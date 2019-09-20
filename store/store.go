@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -48,6 +49,7 @@ func Open(dir string, cnt int) (s *Store, err error) {
 			return
 		}
 	}
+	// file
 	f, err := os.OpenFile(fmt.Sprintf("%s/%d", dir, 0), os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
 	if err != nil {
 		return
@@ -57,6 +59,31 @@ func Open(dir string, cnt int) (s *Store, err error) {
 	s.m = make(map[uint64]uint32)
 
 	//read if f not empty
+	if fi, e := f.Stat(); e == nil {
+		if fi.Size() == 0 {
+			return
+		}
+		//read file
+		var seek int
+		for {
+			b := make([]byte, 8)
+			n, errRead := f.Read(b)
+			if errRead != nil || n != 8 {
+				if errRead != nil && errRead.Error() != "EOF" {
+					err = errRead
+				}
+				return
+			}
+			//readed header
+			lenk := uint32(0)
+			if seek == 0 {
+				//lenk = binary.BigEndian.Uint32(b[2:4])
+			}
+
+			log.Println(seek, b[2:4], lenk, len(b[2:4]))
+			seek += n
+		}
+	}
 	return
 }
 
@@ -67,8 +94,9 @@ func (s *Store) Set(k, v []byte) (err error) {
 	s.Lock()
 	defer s.Unlock()
 	h := xxhash.Sum64(k)
-	idx := h % fileCount
-	fmt.Println(h, idx)
+	//idx := h % fileCount
+	//fmt.Println(h, idx)
+
 	// write head
 	vp, vs := NextPowerOf2(uint32(len(v)))
 	size := sizeHead + int(vs) + len(k)
@@ -88,8 +116,12 @@ func (s *Store) Set(k, v []byte) (err error) {
 	// write body
 	copy(b[sizeHead:], k)
 	copy(b[sizeHead+lenk:], v)
-	//n, _ := s.f.Write(b)
-	//b = append(b, v...)
+
+	// write at file
+	if seek, ok := s.m[h]; ok {
+		fmt.Println("seek", seek)
+		_ = seek
+	}
 	seek, n, err := file.WriteAtPos(s.f, b, -1)
 	s.m[h] = uint32(seek)
 	fmt.Printf("%+v %d %d\n", b, n, vs)
