@@ -34,9 +34,9 @@ func TestPower(t *testing.T) {
 }
 
 func TestWrite(t *testing.T) {
-	s, err := Open("", 1)
+	s, err := Open("1", 1)
 	assert.NoError(t, err)
-	s.Write([]byte("hello"), []byte("go"))
+	s.Set([]byte("hello"), []byte("go"))
 }
 func TestHead(t *testing.T) {
 	//b := [8]byte{0, 1, 0, 5, 0, 0, 0, 2}
