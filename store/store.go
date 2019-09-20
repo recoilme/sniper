@@ -3,36 +3,80 @@ package store
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"sync"
 
 	"github.com/cespare/xxhash/v2"
 )
 
 const fileCount = 1 //must be more then zero
 const fileMode = 0666
+const dirMode = 0777
 const sizeHead = 8
 
-var s Store
+//var s Store
 
 type Store struct {
-	buckets [fileCount]*os.File
+	sync.RWMutex
+	dir string
+	f   *os.File
+	m   map[uint64]uint32
+}
+
+//Open return new store
+func Open(dir string, cnt int) (s *Store, err error) {
+	s = &Store{}
+	s.Lock()
+	defer s.Unlock()
+
+	if dir == "" {
+		dir = "."
+	}
+
+	// create dirs
+	_, err = os.Stat(dir)
+	if err != nil {
+		// file not exists - create dirs if any
+		if os.IsNotExist(err) {
+			if filepath.Dir(dir) != "." {
+				err = os.MkdirAll(filepath.Dir(dir), os.FileMode(dirMode))
+				if err != nil {
+					return
+				}
+			}
+		} else {
+			return
+		}
+	}
+	f, err := os.OpenFile(fmt.Sprintf("%s/%d", dir, 0), os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
+	if err != nil {
+		return
+	}
+	s.dir = dir
+	s.f = f
+	s.m = make(map[uint64]uint32)
+
+	//read if f not empty
+	return
 }
 
 func init() {
-	s = Store{}
-	for idx := 0; idx < fileCount; idx++ {
-		f, err := os.OpenFile(fmt.Sprintf("%d", idx), os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(0)
-		}
-		s.buckets[idx] = f
-	}
+	/*
+		s = Store{}
+		for idx := 0; idx < fileCount; idx++ {
+			f, err := os.OpenFile(fmt.Sprintf("%d", idx), os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(0)
+			}
+			s.buckets[idx] = f
+		}*/
 }
 
 // Write to file
 // [0     1                 0 5      0 0 0 2   104 101 108 108 111 103 111]
 // [flag bucketsize(2^1) keysize(5) valsize(2)  h   e   l   l   o   g   o]
-func Write(k, v []byte) {
+func (s *Store) Write(k, v []byte) {
 	h := xxhash.Sum64(k)
 	idx := h % fileCount
 	fmt.Println(h, idx)
@@ -55,7 +99,7 @@ func Write(k, v []byte) {
 	// write body
 	copy(b[sizeHead:], k)
 	copy(b[sizeHead+lenk:], v)
-	n, _ := s.buckets[idx].Write(b)
+	n, _ := s.f.Write(b)
 	//b = append(b, v...)
 	fmt.Printf("%+v %d %d\n", b, n, vs)
 }

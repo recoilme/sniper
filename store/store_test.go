@@ -2,6 +2,8 @@ package store
 
 import (
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPower(t *testing.T) {
@@ -32,7 +34,9 @@ func TestPower(t *testing.T) {
 }
 
 func TestWrite(t *testing.T) {
-	Write([]byte("hello"), []byte("go"))
+	s, err := Open("", 1)
+	assert.NoError(t, err)
+	s.Write([]byte("hello"), []byte("go"))
 }
 func TestHead(t *testing.T) {
 	//b := [8]byte{0, 1, 0, 5, 0, 0, 0, 2}
