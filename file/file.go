@@ -14,3 +14,14 @@ func WriteAtPos(f *os.File, b []byte, pos int64) (seek int64, n int, err error) 
 	n, err = f.WriteAt(b, seek)
 	return
 }
+
+// ReadAtPos read from pos
+func ReadAtPos(f *os.File, b []byte, pos int64) (n int, err error) {
+
+	_, err = f.Seek(0, 0)
+	if err != nil {
+		return 0, err
+	}
+
+	return f.Read(b)
+}
