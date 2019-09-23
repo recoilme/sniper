@@ -2,7 +2,6 @@ package store
 
 import (
 	"bytes"
-	"log"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,10 +37,26 @@ func TestPower(t *testing.T) {
 func TestSetGet(t *testing.T) {
 	s, err := Open("1")
 	assert.NoError(t, err)
-	s.Set([]byte("hello"), []byte("go"))
-	s.Set([]byte("hello"), []byte("go"))
+
+	err = s.Set([]byte("hello"), []byte("go"))
+	assert.NoError(t, err)
+	err = s.Set([]byte("hello"), []byte("world"))
+	assert.NoError(t, err)
 	res, err := s.Get([]byte("hello"))
 	assert.NoError(t, err)
-	assert.Equal(t, true, bytes.Equal(res, []byte("go")))
-	log.Println("res", res)
+	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
+	assert.Equal(t, 1, s.Count())
+
+	err = s.Close()
+	s, err = Open("1")
+	res, err = s.Get([]byte("hello"))
+	assert.NoError(t, err)
+	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
+	assert.Equal(t, 1, s.Count())
+	err = s.Close()
+	assert.NoError(t, err)
+	err = s.DeleteFile()
+	assert.NoError(t, err)
+	err = DeleteStore("1")
+	assert.NoError(t, err)
 }
