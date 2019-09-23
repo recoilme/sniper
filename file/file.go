@@ -18,7 +18,7 @@ func WriteAtPos(f *os.File, b []byte, pos int64) (seek int64, n int, err error) 
 // ReadAtPos read from pos
 func ReadAtPos(f *os.File, b []byte, pos int64) (n int, err error) {
 
-	_, err = f.Seek(0, 0)
+	_, err = f.Seek(pos, 0)
 	if err != nil {
 		return 0, err
 	}
