@@ -20,12 +20,15 @@ var errFormat = errors.New("Unexpected file format")
 var errNotFound = errors.New("Error key not found")
 
 // Store struct
+// f - file with data
+// m - keys: hash / addr
+// h - holes: addr / size
 type Store struct {
 	sync.RWMutex
 	dir string
-	f   *os.File
-	m   map[uint64]uint32
-	h   map[uint32]uint8
+	f   *os.File          // file storage
+	m   map[uint64]uint32 //keys: hash / addr
+	h   map[uint32]uint8  //holes: addr / size
 }
 
 //Open return new store
@@ -54,6 +57,7 @@ func Open(dir string) (s *Store, err error) {
 			return
 		}
 	}
+
 	// file (0 hardcoded right now)
 	f, err := os.OpenFile(fmt.Sprintf("%s/%d", dir, 0), os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
 	if err != nil {
@@ -138,12 +142,12 @@ func (s *Store) Set(k, v []byte) (err error) {
 
 	// write at file
 	pos := int64(-1)
-	_ = pos
+
 	if seek, ok := s.m[h]; ok {
 		//fmt.Println("seek", seek)
 		sizeold := make([]byte, 1)
-		n, err := s.f.ReadAt(sizeold, int64(seek))
-		if err != nil || n != 1 {
+		_, err := s.f.ReadAt(sizeold, int64(seek))
+		if err != nil {
 			return err
 		}
 		if err == nil && sizeold[0] == vp {
@@ -154,6 +158,7 @@ func (s *Store) Set(k, v []byte) (err error) {
 			delb := make([]byte, 1)
 			delb[0] = deleted
 			s.f.WriteAt(delb, int64(seek+1))
+
 			s.h[seek] = sizeold[0]
 			//log.Println("hole", int64(seek), sizeold[0])
 
@@ -170,7 +175,7 @@ func (s *Store) Set(k, v []byte) (err error) {
 	}
 	// write at end or in hole or overwrite
 	if pos < 0 {
-		pos, err = s.f.Seek(0, 2)
+		pos, err = s.f.Seek(0, 2) // append to the end of file
 	}
 	s.f.WriteAt(b, pos)
 	s.m[h] = uint32(pos)
@@ -213,6 +218,16 @@ func (s *Store) DeleteFile() error {
 // DeleteStore - remove directory with files
 func DeleteStore(dir string) error {
 	return os.RemoveAll(dir)
+}
+
+// FileSize returns the total size of the disk storage used by the DB.
+func (s *Store) FileSize() (int64, error) {
+	var err error
+	is, err := s.f.Stat()
+	if err != nil {
+		return -1, err
+	}
+	return is.Size(), nil
 }
 
 // https://github.com/thejerf/gomempool/blob/master/pool.go#L519
