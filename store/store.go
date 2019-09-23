@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
 	"os"
@@ -21,10 +22,11 @@ type Store struct {
 	dir string
 	f   *os.File
 	m   map[uint64]uint32
+	h   map[uint32]uint8
 }
 
 //Open return new store
-func Open(dir string, cnt int) (s *Store, err error) {
+func Open(dir string) (s *Store, err error) {
 	s = &Store{}
 	s.Lock()
 	defer s.Unlock()
@@ -49,7 +51,7 @@ func Open(dir string, cnt int) (s *Store, err error) {
 			return
 		}
 	}
-	// file
+	// file (0 right now)
 	f, err := os.OpenFile(fmt.Sprintf("%s/%d", dir, 0), os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
 	if err != nil {
 		return
@@ -57,6 +59,7 @@ func Open(dir string, cnt int) (s *Store, err error) {
 	s.dir = dir
 	s.f = f
 	s.m = make(map[uint64]uint32)
+	s.h = make(map[uint32]uint8)
 
 	//read if f not empty
 	if fi, e := f.Stat(); e == nil {
@@ -75,13 +78,21 @@ func Open(dir string, cnt int) (s *Store, err error) {
 				return
 			}
 			//readed header
-			lenk := uint32(0)
-			if seek == 0 {
-				//lenk = binary.BigEndian.Uint32(b[2:4])
+			lenk := binary.BigEndian.Uint16(b[2:4])
+			key := make([]byte, lenk)
+			f.Read(key)
+			shiftv := 1 << byte(b[0]) //2^pow
+			ret, _ := f.Seek(int64(shiftv-int(lenk)), 1)
+			h := xxhash.Sum64(key)
+			if b[1] != 255 {
+				// not deleted
+				s.m[h] = uint32(seek)
+			} else {
+				//deleted blocks store
+				s.h[uint32(seek)] = b[0]
 			}
-
-			log.Println(seek, b[2:4], lenk, len(b[2:4]))
-			seek += n
+			log.Println(seek, key, ret)
+			seek += int(ret)
 		}
 	}
 	return
@@ -94,15 +105,13 @@ func (s *Store) Set(k, v []byte) (err error) {
 	s.Lock()
 	defer s.Unlock()
 	h := xxhash.Sum64(k)
-	//idx := h % fileCount
-	//fmt.Println(h, idx)
 
 	// write head
-	vp, vs := NextPowerOf2(uint32(len(v)))
-	size := sizeHead + int(vs) + len(k)
+	vp, vs := NextPowerOf2(uint32(len(v) + len(k)))
+	size := sizeHead + int(vs)
 	b := make([]byte, size)
-	b[0] = byte(0)
-	b[1] = vp
+	b[0] = vp
+	b[1] = byte(0)
 	//len key in bigendian format
 	lenk := uint16(len(k))
 	b[2] = byte(lenk >> 8)
@@ -118,18 +127,53 @@ func (s *Store) Set(k, v []byte) (err error) {
 	copy(b[sizeHead+lenk:], v)
 
 	// write at file
+	pos := int64(-1)
 	if seek, ok := s.m[h]; ok {
-		fmt.Println("seek", seek)
-		_ = seek
+		//fmt.Println("seek", seek)
+		sizeold := make([]byte, 1)
+		_, err = file.ReadAtPos(s.f, sizeold, int64(seek))
+		if err == nil && sizeold[0] >= vp {
+			//overwrite
+			pos = int64(seek)
+		} else {
+			// mark old k/v as deleted
+			delb := make([]byte, 1)
+			delb[0] = 255
+			file.WriteAtPos(s.f, delb, int64(seek+1))
+			// add addr 2 holes
+			s.h[seek] = sizeold[0]
+			//log.Println("mark old k/v as deleted")
+			// try to find optimal empty hole
+			for addr, size := range s.h {
+				if size == vp {
+					pos = int64(addr)
+					delete(s.h, addr)
+					break
+				}
+			}
+		}
 	}
-	seek, n, err := file.WriteAtPos(s.f, b, -1)
+	// write at end or in hole or overwrite
+	seek, _, err := file.WriteAtPos(s.f, b, pos)
 	s.m[h] = uint32(seek)
-	fmt.Printf("%+v %d %d\n", b, n, vs)
+	//fmt.Printf("%+v %d %d %d\n", b, n, vs, seek)
 	return
 }
 
-func (s *Store) Read(k []byte) {
-
+// Get return val by key
+func (s *Store) Get(k []byte) (v []byte, err error) {
+	s.RLock()
+	defer s.RUnlock()
+	h := xxhash.Sum64(k)
+	if seek, ok := s.m[h]; ok {
+		b := make([]byte, 8)
+		s.f.ReadAt(b, int64(seek))
+		lenk := binary.BigEndian.Uint16(b[2:4])
+		lenv := binary.BigEndian.Uint32(b[4:8])
+		v = make([]byte, lenv)
+		_, err = s.f.ReadAt(v, int64(seek+8+uint32(lenk)))
+	}
+	return
 }
 
 // https://github.com/thejerf/gomempool/blob/master/pool.go#L519
