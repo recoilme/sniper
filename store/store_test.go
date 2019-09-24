@@ -36,10 +36,11 @@ func TestPower(t *testing.T) {
 
 func TestSetGet(t *testing.T) {
 	s, err := Open("1")
+	_ = s
 	assert.NoError(t, err)
-
 	err = s.Set([]byte("hello"), []byte("go"))
 	assert.NoError(t, err)
+
 	err = s.Set([]byte("hello"), []byte("world"))
 	assert.NoError(t, err)
 	res, err := s.Get([]byte("hello"))
@@ -55,8 +56,7 @@ func TestSetGet(t *testing.T) {
 	assert.Equal(t, 1, s.Count())
 	err = s.Close()
 	assert.NoError(t, err)
-	err = s.DeleteFile()
-	assert.NoError(t, err)
+
 	err = DeleteStore("1")
 	assert.NoError(t, err)
 }

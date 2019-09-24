@@ -10,7 +10,8 @@ import (
 	"github.com/cespare/xxhash/v2"
 )
 
-const fileCount = 1 //must be more then zero
+//const fileCount = 1 //must be more then zero
+const chunksCount = 8
 const fileMode = 0666
 const dirMode = 0777
 const sizeHead = 8
@@ -18,24 +19,105 @@ const deleted = 42 // tribute 2 dbf, lol
 
 var errFormat = errors.New("Unexpected file format")
 var errNotFound = errors.New("Error key not found")
+var counters sync.Map
 
 // Store struct
 // f - file with data
 // m - keys: hash / addr
 // h - holes: addr / size
 type Store struct {
-	sync.RWMutex
+	chunks [chunksCount]chunk
+	//sync.RWMutex
 	dir string
-	f   *os.File          // file storage
-	m   map[uint64]uint64 //keys: hash / addr&len
-	h   map[uint32]uint8  //holes: addr / size
+	//f   *os.File          // file storage
+	//m   map[uint64]uint64 //keys: hash / addr&len
+	//h   map[uint32]uint8  //holes: addr / size
+}
+
+type chunk struct {
+	sync.RWMutex
+	name string
+	f    *os.File          // file storage
+	m    map[uint64]uint64 //keys: hash / addr&len
+	h    map[uint32]uint8  //holes: addr / size
+}
+
+func (c *chunk) Init(name string) (err error) {
+	//log.Println("Init", name)
+	c.Lock()
+	defer c.Unlock()
+
+	c.name = name
+	// file (0 hardcoded right now)
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
+	if err != nil {
+		return
+	}
+	err = f.Sync()
+	if err != nil {
+		return
+	}
+	c.f = f
+	c.m = make(map[uint64]uint64)
+	c.h = make(map[uint32]uint8)
+
+	//read if f not empty
+	if fi, e := c.f.Stat(); e == nil {
+		if fi.Size() == 0 {
+			return
+		}
+		//read file
+		//log.Println("Open", fi.Size())
+		var seek int
+		for {
+			b := make([]byte, 8)
+			n, errRead := c.f.Read(b)
+			if errRead != nil || n != 8 {
+				if errRead != nil && errRead.Error() != "EOF" {
+					err = errRead
+				}
+				break
+			}
+			//readed header
+			lenk := binary.BigEndian.Uint16(b[2:4])
+			lenv := binary.BigEndian.Uint32(b[4:8])
+			if lenk == 0 {
+				return errFormat
+			}
+			// skip val
+			_, seekerr := c.f.Seek(int64(lenv), 1)
+			if seekerr != nil {
+				return errFormat
+			}
+			// read key
+			key := make([]byte, lenk)
+			n, errRead = c.f.Read(key)
+			if errRead != nil || n != int(lenk) {
+				return errFormat
+			}
+			shiftv := 1 << byte(b[0])                                      //2^pow
+			ret, seekerr := c.f.Seek(int64(shiftv-int(lenk)-int(lenv)), 1) // skip val && key
+			if seekerr != nil {
+				return errFormat
+			}
+			// map store
+			if b[1] != deleted {
+				h := xxhash.Sum64(key)
+				c.m[h] = seeklenPack(uint32(seek), lenv)
+			} else {
+				//deleted blocks store
+				c.h[uint32(seek)] = b[0] // seek / size
+			}
+			seek = int(ret)
+		}
+	}
+	return
 }
 
 //Open return new store
 func Open(dir string) (s *Store, err error) {
+
 	s = &Store{}
-	s.Lock()
-	defer s.Unlock()
 
 	if dir == "" {
 		dir = "."
@@ -52,70 +134,17 @@ func Open(dir string) (s *Store, err error) {
 				if err != nil {
 					return
 				}
+
 			}
 		} else {
 			return
 		}
 	}
 
-	// file (0 hardcoded right now)
-	f, err := os.OpenFile(fmt.Sprintf("%s/%d", dir, 0), os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
-	if err != nil {
-		return
-	}
-	s.dir = dir
-	s.f = f
-	s.m = make(map[uint64]uint64)
-	s.h = make(map[uint32]uint8)
-
-	//read if f not empty
-	if fi, e := s.f.Stat(); e == nil {
-		if fi.Size() == 0 {
+	for i := range s.chunks[:] {
+		err = s.chunks[i].Init(fmt.Sprintf("%s/%d", dir, i))
+		if err != nil {
 			return
-		}
-		//read file
-		//log.Println("Open", fi.Size())
-		var seek int
-		for {
-			b := make([]byte, 8)
-			n, errRead := s.f.Read(b)
-			if errRead != nil || n != 8 {
-				if errRead != nil && errRead.Error() != "EOF" {
-					err = errRead
-				}
-				break
-			}
-			//readed header
-			lenk := binary.BigEndian.Uint16(b[2:4])
-			lenv := binary.BigEndian.Uint32(b[4:8])
-			if lenk == 0 {
-				return nil, errFormat
-			}
-			// skip val
-			_, seekerr := s.f.Seek(int64(lenv), 1)
-			if seekerr != nil {
-				return nil, errFormat
-			}
-			// read key
-			key := make([]byte, lenk)
-			n, errRead = s.f.Read(key)
-			if errRead != nil || n != int(lenk) {
-				return nil, errFormat
-			}
-			shiftv := 1 << byte(b[0])                                      //2^pow
-			ret, seekerr := s.f.Seek(int64(shiftv-int(lenk)-int(lenv)), 1) // skip val && key
-			if seekerr != nil {
-				return nil, errFormat
-			}
-			// map store
-			if b[1] != deleted {
-				h := xxhash.Sum64(key)
-				s.m[h] = seeklenPack(uint32(seek), lenv)
-			} else {
-				//deleted blocks store
-				s.h[uint32(seek)] = b[0] // seek / size
-			}
-			seek = int(ret)
 		}
 	}
 	return
@@ -140,11 +169,24 @@ func seeklenUnpack(seeklen uint64) (seek, lenv uint32) {
 	return binary.BigEndian.Uint32(p[:4]), binary.BigEndian.Uint32(p[4:8])
 }
 
-// Set Write to file
+// Set - calc chunk idx and write in it
 func (s *Store) Set(k, v []byte) (err error) {
-	s.Lock()
-	defer s.Unlock()
 	h := xxhash.Sum64(k)
+	idx := h % chunksCount
+	return s.chunks[idx].set(k, v, h)
+}
+
+// Get - calc chunk idx and get from it
+func (s *Store) Get(k []byte) (v []byte, err error) {
+	h := xxhash.Sum64(k)
+	idx := h % chunksCount
+	return s.chunks[idx].get(k, h)
+}
+
+// Set Write to file
+func (c *chunk) set(k, v []byte, h uint64) (err error) {
+	c.Lock()
+	defer c.Unlock()
 
 	// write head
 	vp, vs := NextPowerOf2(uint32(len(v) + len(k)))
@@ -162,18 +204,18 @@ func (s *Store) Set(k, v []byte) (err error) {
 	b[5] = byte(lenv >> 16)
 	b[6] = byte(lenv >> 8)
 	b[7] = byte(lenv)
-	// write body
+	// write body: val and key
 	copy(b[sizeHead:], v)
 	copy(b[sizeHead+lenv:], k)
 
 	// write at file
 	pos := int64(-1)
 
-	if seeklen, ok := s.m[h]; ok {
+	if seeklen, ok := c.m[h]; ok {
 		//fmt.Println("seek", seek)
 		seek, _ := seeklenUnpack(seeklen)
 		sizeold := make([]byte, 1)
-		_, err := s.f.ReadAt(sizeold, int64(seek))
+		_, err := c.f.ReadAt(sizeold, int64(seek))
 		if err != nil {
 			return err
 		}
@@ -184,17 +226,17 @@ func (s *Store) Set(k, v []byte) (err error) {
 			// mark old k/v as deleted
 			delb := make([]byte, 1)
 			delb[0] = deleted
-			s.f.WriteAt(delb, int64(seek+1))
+			c.f.WriteAt(delb, int64(seek+1))
 
-			s.h[seek] = sizeold[0]
+			c.h[seek] = sizeold[0]
 			//log.Println("hole", int64(seek), sizeold[0])
 
 			// try to find optimal empty hole
-			for addrh, sizeh := range s.h {
+			for addrh, sizeh := range c.h {
 				if sizeh == vp {
 					pos = int64(addrh)
 					//log.Println("find hole", addrh, sizeh)
-					delete(s.h, addrh)
+					delete(c.h, addrh)
 					break
 				}
 			}
@@ -202,26 +244,22 @@ func (s *Store) Set(k, v []byte) (err error) {
 	}
 	// write at end or in hole or overwrite
 	if pos < 0 {
-		pos, err = s.f.Seek(0, 2) // append to the end of file
+		pos, err = c.f.Seek(0, 2) // append to the end of file
 	}
-	s.f.WriteAt(b, pos)
-	s.m[h] = seeklenPack(uint32(pos), lenv)
+	c.f.WriteAt(b, pos)
+	c.m[h] = seeklenPack(uint32(pos), lenv)
 	return
 }
 
 // Get return val by key
-func (s *Store) Get(k []byte) (v []byte, err error) {
-	s.RLock()
-	defer s.RUnlock()
-	h := xxhash.Sum64(k)
-	if seeklen, ok := s.m[h]; ok {
+func (c *chunk) get(k []byte, h uint64) (v []byte, err error) {
+	c.RLock()
+	defer c.RUnlock()
+	if seeklen, ok := c.m[h]; ok {
 		seek, lenv := seeklenUnpack(seeklen)
-		//b := make([]byte, 8)
-		//s.f.ReadAt(b, int64(seek))
-		//lenk := binary.BigEndian.Uint16(b[2:4])
-		//lenv := binary.BigEndian.Uint32(b[4:8])
+
 		v = make([]byte, lenv)
-		_, err = s.f.ReadAt(v, int64(seek+sizeHead))
+		_, err = c.f.ReadAt(v, int64(seek+sizeHead))
 	} else {
 		return nil, errNotFound
 	}
@@ -229,18 +267,34 @@ func (s *Store) Get(k []byte) (v []byte, err error) {
 }
 
 // Count return count keys
-func (s *Store) Count() int {
-	return len(s.m)
+func (s *Store) Count() (cnt int) {
+	for i := range s.chunks[:] {
+		cnt += s.chunks[i].count()
+	}
+	return
 }
 
-// Close - close related file
-func (s *Store) Close() error {
-	return s.f.Close()
+func (c *chunk) count() int {
+	c.RLock()
+	defer c.RUnlock()
+	return len(c.m)
 }
 
-// DeleteFile - delete file
-func (s *Store) DeleteFile() error {
-	return os.Remove(s.f.Name())
+// Close - close related chunk
+func (s *Store) Close() (err error) {
+	for i := range s.chunks[:] {
+		err = s.chunks[i].close()
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (c *chunk) close() (err error) {
+	c.Lock()
+	defer c.Unlock()
+	return c.f.Close()
 }
 
 // DeleteStore - remove directory with files
@@ -249,9 +303,21 @@ func DeleteStore(dir string) error {
 }
 
 // FileSize returns the total size of the disk storage used by the DB.
-func (s *Store) FileSize() (int64, error) {
-	var err error
-	is, err := s.f.Stat()
+func (s *Store) FileSize() (fs int64, err error) {
+	for i := range s.chunks[:] {
+		is, err := s.chunks[i].fileSize()
+		if err != nil {
+			return -1, err
+		}
+		fs += is
+	}
+	return
+}
+
+func (c *chunk) fileSize() (int64, error) {
+	c.Lock()
+	defer c.Unlock()
+	is, err := c.f.Stat()
 	if err != nil {
 		return -1, err
 	}
