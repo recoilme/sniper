@@ -10,45 +10,35 @@ import (
 	"github.com/cespare/xxhash/v2"
 )
 
-//const fileCount = 1 //must be more then zero
-const chunksCount = 8
+const chunksCount = 8 //must be more then zero
 const fileMode = 0666
 const dirMode = 0777
 const sizeHead = 8
-const deleted = 42 // tribute 2 dbf, lol
+const deleted = 42 // flag for removed, tribute 2 dbf!
 
 var errFormat = errors.New("Unexpected file format")
 var errNotFound = errors.New("Error key not found")
 var counters sync.Map
 
 // Store struct
-// f - file with data
-// m - keys: hash / addr
-// h - holes: addr / size
+// data sharded by chunks
 type Store struct {
 	chunks [chunksCount]chunk
-	//sync.RWMutex
-	dir string
-	//f   *os.File          // file storage
-	//m   map[uint64]uint64 //keys: hash / addr&len
-	//h   map[uint32]uint8  //holes: addr / size
+	dir    string
 }
 
+// chunk
 type chunk struct {
 	sync.RWMutex
-	name string
-	f    *os.File          // file storage
-	m    map[uint64]uint64 //keys: hash / addr&len
-	h    map[uint32]uint8  //holes: addr / size
+	f *os.File          // file storage
+	m map[uint64]uint64 // keys: hash / addr&len
+	h map[uint32]uint8  // holes: addr / size
 }
 
 func (c *chunk) Init(name string) (err error) {
-	//log.Println("Init", name)
 	c.Lock()
 	defer c.Unlock()
 
-	c.name = name
-	// file (0 hardcoded right now)
 	f, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
 	if err != nil {
 		return
@@ -67,7 +57,6 @@ func (c *chunk) Init(name string) (err error) {
 			return
 		}
 		//read file
-		//log.Println("Open", fi.Size())
 		var seek int
 		for {
 			b := make([]byte, 8)
@@ -114,9 +103,9 @@ func (c *chunk) Init(name string) (err error) {
 	return
 }
 
-//Open return new store
+// Open return new store
+// dir will be created
 func Open(dir string) (s *Store, err error) {
-
 	s = &Store{}
 
 	if dir == "" {
@@ -134,13 +123,13 @@ func Open(dir string) (s *Store, err error) {
 				if err != nil {
 					return
 				}
-
 			}
 		} else {
 			return
 		}
 	}
 
+	// create chuncks
 	for i := range s.chunks[:] {
 		err = s.chunks[i].Init(fmt.Sprintf("%s/%d", dir, i))
 		if err != nil {
@@ -150,6 +139,7 @@ func Open(dir string) (s *Store, err error) {
 	return
 }
 
+// pack addr & len of value 2 uint64
 func seeklenPack(seek, lenv uint32) uint64 {
 	p := make([]byte, 8)
 	p[0] = byte(seek >> 24)
@@ -163,6 +153,7 @@ func seeklenPack(seek, lenv uint32) uint64 {
 	return binary.BigEndian.Uint64(p)
 }
 
+// unpack addr & len
 func seeklenUnpack(seeklen uint64) (seek, lenv uint32) {
 	p := make([]byte, 8)
 	binary.BigEndian.PutUint64(p, seeklen)
@@ -183,7 +174,7 @@ func (s *Store) Get(k []byte) (v []byte, err error) {
 	return s.chunks[idx].get(k, h)
 }
 
-// Set Write to file
+// set - write data to file & in map
 func (c *chunk) set(k, v []byte, h uint64) (err error) {
 	c.Lock()
 	defer c.Unlock()
@@ -212,7 +203,6 @@ func (c *chunk) set(k, v []byte, h uint64) (err error) {
 	pos := int64(-1)
 
 	if seeklen, ok := c.m[h]; ok {
-		//fmt.Println("seek", seek)
 		seek, _ := seeklenUnpack(seeklen)
 		sizeold := make([]byte, 1)
 		_, err := c.f.ReadAt(sizeold, int64(seek))
@@ -229,13 +219,11 @@ func (c *chunk) set(k, v []byte, h uint64) (err error) {
 			c.f.WriteAt(delb, int64(seek+1))
 
 			c.h[seek] = sizeold[0]
-			//log.Println("hole", int64(seek), sizeold[0])
 
 			// try to find optimal empty hole
 			for addrh, sizeh := range c.h {
 				if sizeh == vp {
 					pos = int64(addrh)
-					//log.Println("find hole", addrh, sizeh)
 					delete(c.h, addrh)
 					break
 				}
@@ -251,7 +239,7 @@ func (c *chunk) set(k, v []byte, h uint64) (err error) {
 	return
 }
 
-// Get return val by key
+// get return val by key
 func (c *chunk) get(k []byte, h uint64) (v []byte, err error) {
 	c.RLock()
 	defer c.RUnlock()
@@ -274,13 +262,14 @@ func (s *Store) Count() (cnt int) {
 	return
 }
 
+// return map length
 func (c *chunk) count() int {
 	c.RLock()
 	defer c.RUnlock()
 	return len(c.m)
 }
 
-// Close - close related chunk
+// Close - close related chunks
 func (s *Store) Close() (err error) {
 	for i := range s.chunks[:] {
 		err = s.chunks[i].close()
@@ -291,6 +280,7 @@ func (s *Store) Close() (err error) {
 	return
 }
 
+// close file
 func (c *chunk) close() (err error) {
 	c.Lock()
 	defer c.Unlock()
