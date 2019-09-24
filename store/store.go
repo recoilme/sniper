@@ -27,7 +27,7 @@ type Store struct {
 	sync.RWMutex
 	dir string
 	f   *os.File          // file storage
-	m   map[uint64]uint32 //keys: hash / addr
+	m   map[uint64]uint64 //keys: hash / addr&len
 	h   map[uint32]uint8  //holes: addr / size
 }
 
@@ -65,7 +65,7 @@ func Open(dir string) (s *Store, err error) {
 	}
 	s.dir = dir
 	s.f = f
-	s.m = make(map[uint64]uint32)
+	s.m = make(map[uint64]uint64)
 	s.h = make(map[uint32]uint8)
 
 	//read if f not empty
@@ -87,23 +87,30 @@ func Open(dir string) (s *Store, err error) {
 			}
 			//readed header
 			lenk := binary.BigEndian.Uint16(b[2:4])
+			lenv := binary.BigEndian.Uint32(b[4:8])
 			if lenk == 0 {
 				return nil, errFormat
 			}
+			// skip val
+			_, seekerr := s.f.Seek(int64(lenv), 1)
+			if seekerr != nil {
+				return nil, errFormat
+			}
+			// read key
 			key := make([]byte, lenk)
 			n, errRead = s.f.Read(key)
 			if errRead != nil || n != int(lenk) {
 				return nil, errFormat
 			}
-			shiftv := 1 << byte(b[0])                            //2^pow
-			ret, seekerr := s.f.Seek(int64(shiftv-int(lenk)), 1) // skip val && key
+			shiftv := 1 << byte(b[0])                                      //2^pow
+			ret, seekerr := s.f.Seek(int64(shiftv-int(lenk)-int(lenv)), 1) // skip val && key
 			if seekerr != nil {
 				return nil, errFormat
 			}
 			// map store
 			if b[1] != deleted {
 				h := xxhash.Sum64(key)
-				s.m[h] = uint32(seek)
+				s.m[h] = seeklenPack(uint32(seek), lenv)
 			} else {
 				//deleted blocks store
 				s.h[uint32(seek)] = b[0] // seek / size
@@ -112,6 +119,25 @@ func Open(dir string) (s *Store, err error) {
 		}
 	}
 	return
+}
+
+func seeklenPack(seek, lenv uint32) uint64 {
+	p := make([]byte, 8)
+	p[0] = byte(seek >> 24)
+	p[1] = byte(seek >> 16)
+	p[2] = byte(seek >> 8)
+	p[3] = byte(seek)
+	p[4] = byte(lenv >> 24)
+	p[5] = byte(lenv >> 16)
+	p[6] = byte(lenv >> 8)
+	p[7] = byte(lenv)
+	return binary.BigEndian.Uint64(p)
+}
+
+func seeklenUnpack(seeklen uint64) (seek, lenv uint32) {
+	p := make([]byte, 8)
+	binary.BigEndian.PutUint64(p, seeklen)
+	return binary.BigEndian.Uint32(p[:4]), binary.BigEndian.Uint32(p[4:8])
 }
 
 // Set Write to file
@@ -137,14 +163,15 @@ func (s *Store) Set(k, v []byte) (err error) {
 	b[6] = byte(lenv >> 8)
 	b[7] = byte(lenv)
 	// write body
-	copy(b[sizeHead:], k)
-	copy(b[sizeHead+lenk:], v)
+	copy(b[sizeHead:], v)
+	copy(b[sizeHead+lenv:], k)
 
 	// write at file
 	pos := int64(-1)
 
-	if seek, ok := s.m[h]; ok {
+	if seeklen, ok := s.m[h]; ok {
 		//fmt.Println("seek", seek)
+		seek, _ := seeklenUnpack(seeklen)
 		sizeold := make([]byte, 1)
 		_, err := s.f.ReadAt(sizeold, int64(seek))
 		if err != nil {
@@ -178,7 +205,7 @@ func (s *Store) Set(k, v []byte) (err error) {
 		pos, err = s.f.Seek(0, 2) // append to the end of file
 	}
 	s.f.WriteAt(b, pos)
-	s.m[h] = uint32(pos)
+	s.m[h] = seeklenPack(uint32(pos), lenv)
 	return
 }
 
@@ -187,13 +214,14 @@ func (s *Store) Get(k []byte) (v []byte, err error) {
 	s.RLock()
 	defer s.RUnlock()
 	h := xxhash.Sum64(k)
-	if seek, ok := s.m[h]; ok {
-		b := make([]byte, 8)
-		s.f.ReadAt(b, int64(seek))
-		lenk := binary.BigEndian.Uint16(b[2:4])
-		lenv := binary.BigEndian.Uint32(b[4:8])
+	if seeklen, ok := s.m[h]; ok {
+		seek, lenv := seeklenUnpack(seeklen)
+		//b := make([]byte, 8)
+		//s.f.ReadAt(b, int64(seek))
+		//lenk := binary.BigEndian.Uint16(b[2:4])
+		//lenv := binary.BigEndian.Uint32(b[4:8])
 		v = make([]byte, lenv)
-		_, err = s.f.ReadAt(v, int64(seek+sizeHead+uint32(lenk)))
+		_, err = s.f.ReadAt(v, int64(seek+sizeHead))
 	} else {
 		return nil, errNotFound
 	}
