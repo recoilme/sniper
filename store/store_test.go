@@ -34,7 +34,7 @@ func TestPower(t *testing.T) {
 	}
 }
 
-func TestSetGet(t *testing.T) {
+func TestCmd(t *testing.T) {
 	s, err := Open("1")
 	_ = s
 	assert.NoError(t, err)
@@ -54,6 +54,11 @@ func TestSetGet(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
 	assert.Equal(t, 1, s.Count())
+
+	deleted, err := s.Delete([]byte("hello"))
+	assert.NoError(t, err)
+	assert.True(t, deleted)
+	assert.Equal(t, 0, s.Count())
 	err = s.Close()
 	assert.NoError(t, err)
 

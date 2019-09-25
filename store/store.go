@@ -10,7 +10,7 @@ import (
 	"github.com/cespare/xxhash/v2"
 )
 
-const chunksCount = 8 //must be more then zero
+const chunksCount = 16 //must be more then zero
 const fileMode = 0666
 const dirMode = 0777
 const sizeHead = 8
@@ -167,13 +167,6 @@ func (s *Store) Set(k, v []byte) (err error) {
 	return s.chunks[idx].set(k, v, h)
 }
 
-// Get - calc chunk idx and get from it
-func (s *Store) Get(k []byte) (v []byte, err error) {
-	h := xxhash.Sum64(k)
-	idx := h % chunksCount
-	return s.chunks[idx].get(k, h)
-}
-
 // set - write data to file & in map
 func (c *chunk) set(k, v []byte, h uint64) (err error) {
 	c.Lock()
@@ -237,6 +230,13 @@ func (c *chunk) set(k, v []byte, h uint64) (err error) {
 	c.f.WriteAt(b, pos)
 	c.m[h] = seeklenPack(uint32(pos), lenv)
 	return
+}
+
+// Get - calc chunk idx and get from it
+func (s *Store) Get(k []byte) (v []byte, err error) {
+	h := xxhash.Sum64(k)
+	idx := h % chunksCount
+	return s.chunks[idx].get(k, h)
 }
 
 // get return val by key
@@ -345,6 +345,39 @@ func NextPowerOf2(v uint32) (power byte, val uint32) {
 	if power == 32 {
 		//overflow
 		val = 4294967295
+	}
+	return
+}
+
+// Delete - delete item by key
+func (s *Store) Delete(k []byte) (bool, error) {
+	h := xxhash.Sum64(k)
+	idx := h % chunksCount
+	return s.chunks[idx].delete(k, h)
+}
+
+// delete mark item as deleted at specified position
+func (c *chunk) delete(k []byte, h uint64) (isDeleted bool, err error) {
+	c.Lock()
+	defer c.Unlock()
+	if seeklen, ok := c.m[h]; ok {
+		seek, _ := seeklenUnpack(seeklen)
+
+		sizeold := make([]byte, 1)
+		_, err = c.f.ReadAt(sizeold, int64(seek))
+		if err != nil {
+			return
+		}
+
+		delb := make([]byte, 1)
+		delb[0] = deleted
+		_, err = c.f.WriteAt(delb, int64(seek+1))
+		if err != nil {
+			return
+		}
+		delete(c.m, h)
+		c.h[seek] = sizeold[0]
+		isDeleted = true
 	}
 	return
 }
