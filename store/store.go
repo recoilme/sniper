@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 
@@ -19,6 +20,7 @@ const deleted = 42 // flag for removed, tribute 2 dbf!
 var errFormat = errors.New("Unexpected file format")
 var errNotFound = errors.New("Error key not found")
 var counters sync.Map
+var mutex = &sync.RWMutex{} //global mutex for counters and so on
 
 // Store struct
 // data sharded by chunks
@@ -380,4 +382,87 @@ func (c *chunk) delete(k []byte, h uint64) (isDeleted bool, err error) {
 		isDeleted = true
 	}
 	return
+}
+
+// Incr - Incr item by uint64
+// inited with zero
+func (s *Store) Incr(k []byte, v uint64) (uint64, error) {
+	h := xxhash.Sum64(k)
+	idx := h % chunksCount
+	return s.chunks[idx].incrdecr(k, h, v, true)
+}
+
+// Decr - Decr item by uint64
+// inited with zero
+func (s *Store) Decr(k []byte, v uint64) (uint64, error) {
+	h := xxhash.Sum64(k)
+	idx := h % chunksCount
+	return s.chunks[idx].incrdecr(k, h, v, false)
+}
+
+func (c *chunk) incrdecr(k []byte, h, v uint64, isIncr bool) (counter uint64, err error) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	old, err := c.get(k, h)
+	if err == errNotFound {
+		//create empty counter
+		old = make([]byte, 8)
+		err = nil
+	}
+	if len(old) != 8 {
+		//better, then panic
+		return 0, errors.New("Unexpected value format")
+	}
+	if err != nil {
+		return
+	}
+	counter = binary.BigEndian.Uint64(old)
+	if isIncr {
+		counter += v
+	} else {
+		//decr
+		counter -= v
+	}
+	new := make([]byte, 8)
+	binary.BigEndian.PutUint64(new, counter)
+	err = c.set(k, new, h)
+
+	return
+}
+
+// Backup remove files with same name with bak extension
+// and create new backup
+func (s *Store) Backup() (err error) {
+	for i := range s.chunks[:] {
+		err = s.chunks[i].backup()
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (c *chunk) backup() (err error) {
+	c.Lock()
+	defer c.Unlock()
+	name := c.f.Name() + ".bak"
+	os.Remove(name)
+
+	dest, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
+	if err != nil {
+		return
+	}
+	err = c.f.Sync()
+	if err != nil {
+		return
+	}
+	_, err = c.f.Seek(0, 0)
+	if err != nil {
+		return
+	}
+	if _, err = io.Copy(dest, c.f); err != nil {
+		return
+	}
+	dest.Sync()
+	return dest.Close()
 }

@@ -35,8 +35,11 @@ func TestPower(t *testing.T) {
 }
 
 func TestCmd(t *testing.T) {
+	err := DeleteStore("1")
+	assert.NoError(t, err)
+
 	s, err := Open("1")
-	_ = s
+
 	assert.NoError(t, err)
 	err = s.Set([]byte("hello"), []byte("go"))
 	assert.NoError(t, err)
@@ -59,9 +62,32 @@ func TestCmd(t *testing.T) {
 	assert.NoError(t, err)
 	assert.True(t, deleted)
 	assert.Equal(t, 0, s.Count())
+
+	counter := []byte("counter")
+
+	cnt, err := s.Incr(counter, uint64(1))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, int(cnt))
+	cnt, err = s.Incr(counter, uint64(42))
+	assert.NoError(t, err)
+	assert.Equal(t, 43, int(cnt))
+
+	cnt, err = s.Decr(counter, uint64(2))
+	assert.NoError(t, err)
+	assert.Equal(t, 41, int(cnt))
+
+	//overflow
+	cnt, err = s.Decr(counter, uint64(42))
+	assert.NoError(t, err)
+	assert.Equal(t, uint64(18446744073709551615), uint64(cnt))
+
+	err = s.Backup()
+	assert.NoError(t, err)
+
 	err = s.Close()
 	assert.NoError(t, err)
 
 	err = DeleteStore("1")
 	assert.NoError(t, err)
+
 }
