@@ -1,4 +1,4 @@
-package store
+package sniper
 
 import (
 	"encoding/binary"
