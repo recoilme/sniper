@@ -51,4 +51,4 @@ Vadim Kulibaba [@recoilme](https://github.com/recoilme)
 
 ## License
 
-`shardmap` source code is available under the MIT [License](/LICENSE).
+`sniper` source code is available under the MIT [License](/LICENSE).
