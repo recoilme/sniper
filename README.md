@@ -36,7 +36,7 @@ s.Close()
 
 ## Performance
 
-Benchmarking conncurrent SET, GET operations  
+Benchmarking conncurrent SET, GET, DELETE operations vs github.com/dgraph-io/badger v1.6.0
 
 ```
 go version go1.13 darwin/amd64 (Macbook Early 2015)
@@ -49,8 +49,14 @@ go version go1.13 darwin/amd64 (Macbook Early 2015)
 -- sniper --
 
 set: 1,000,000 ops over 4 threads in 4983ms, 200,681/sec, 4983 ns/op, 69.3 MB, 72 bytes/op
-get: 1,000,000 ops over 4 threads in 1813ms, 551,427/sec, 1813 ns/op, 7.6 MB, 8 bytes/op
+get: 1,000,000 ops over 4 threads in 2000ms, 500,099/sec, 1999 ns/op, 7.6 MB, 8 bytes/op
 del: 1,000,000 ops over 4 threads in 4689ms, 213,281/sec, 4688 ns/op, 33.5 MB, 35 bytes/op
+
+-- badger --
+
+set: 1,000,000 ops over 4 threads in 25331ms, 39,476/sec, 25331 ns/op, 121.0 MB, 126 bytes/op
+get: 1,000,000 ops over 4 threads in 2222ms, 450,007/sec, 2222 ns/op, 53.9 MB, 56 bytes/op
+del: 1,000,000 ops over 4 threads in 25292ms, 39,538/sec, 25291 ns/op, 42.2 MB, 44 bytes/op
 
 ```
 
