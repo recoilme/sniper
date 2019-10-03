@@ -1,6 +1,7 @@
 package sniper
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -8,10 +9,12 @@ import (
 	"os"
 	"sync"
 
-	"github.com/cespare/xxhash/v2"
+	"github.com/spaolacci/murmur3"
 )
 
-const chunksCount = 16 //must be more then zero
+//max chunk size 128Mb
+const chunksCnt = 16  //must be more then zero
+const chunkColCnt = 4 // chunks for collisions
 const fileMode = 0666
 const dirMode = 0777
 const sizeHead = 8
@@ -19,13 +22,15 @@ const deleted = 42 // flag for removed, tribute 2 dbf!
 
 var errFormat = errors.New("Unexpected file format")
 var errNotFound = errors.New("Error key not found")
+var errCollision = errors.New("Error hash collision")
 var counters sync.Map
 var mutex = &sync.RWMutex{} //global mutex for counters and so on
+//var hash32a = fnv.New32a()
 
 // Store struct
 // data sharded by chunks
 type Store struct {
-	chunks [chunksCount]chunk
+	chunks [chunksCnt]chunk
 	dir    string
 }
 
@@ -33,8 +38,34 @@ type Store struct {
 type chunk struct {
 	sync.RWMutex
 	f *os.File          // file storage
-	m map[uint64]uint64 // keys: hash / addr&len
-	h map[uint32]uint8  // holes: addr / size
+	m map[uint32]uint32 // keys: hash / addr&len
+	h map[uint32]byte   // holes: addr / size
+}
+
+func hash(b []byte) uint32 {
+	return murmur3.Sum32WithSeed(b, 0)
+	/*
+			//MASK_24 := uint32((1 << 24) - 1)
+		//hash32a.Reset()
+		//tab := crc32.IEEE simpleMakeTable(IEEE)
+		//h := fnv.New32()
+		return murmur3.Sum32WithSeed(b, 0)
+		//mur := murmur3.New32()
+		//mur.Write(b)
+		//h32 := mur.Sum32()
+		//h32 := xxh.Checksum32(b)
+		//h.Reset()
+		//h.Write(b)
+		//h32 := h.Sum32()
+		//println(h32)
+		//return h32
+
+		//hash32a :=
+		//hash32a.Write(b)
+		//ss := h.Sum32()
+		//hash := (ss >> 24) ^ (ss & MASK_24)
+		//return hash32a.Sum32()
+	*/
 }
 
 func (c *chunk) Init(name string) (err error) {
@@ -50,7 +81,7 @@ func (c *chunk) Init(name string) (err error) {
 		return
 	}
 	c.f = f
-	c.m = make(map[uint64]uint64)
+	c.m = make(map[uint32]uint32)
 	c.h = make(map[uint32]uint8)
 
 	//read if f not empty
@@ -86,15 +117,15 @@ func (c *chunk) Init(name string) (err error) {
 			if errRead != nil || n != int(lenk) {
 				return errFormat
 			}
-			shiftv := 1 << byte(b[0])                                      //2^pow
-			ret, seekerr := c.f.Seek(int64(shiftv-int(lenk)-int(lenv)), 1) // skip val && key
+			shiftv := 1 << byte(b[0])                                               //2^pow
+			ret, seekerr := c.f.Seek(int64(shiftv-int(lenk)-int(lenv)-sizeHead), 1) // skip val && key
 			if seekerr != nil {
 				return errFormat
 			}
 			// map store
 			if b[1] != deleted {
-				h := xxhash.Sum64(key)
-				c.m[h] = seeklenPack(uint32(seek), lenv)
+				h := hash(key)
+				c.m[h] = addrsizePack(uint32(seek), b[0])
 			} else {
 				//deleted blocks store
 				c.h[uint32(seek)] = b[0] // seek / size
@@ -133,52 +164,58 @@ func Open(dir string) (s *Store, err error) {
 
 	// create chuncks
 	for i := range s.chunks[:] {
+
 		err = s.chunks[i].Init(fmt.Sprintf("%s/%d", dir, i))
 		if err != nil {
 			return
 		}
 	}
+	println("Opened")
 	return
 }
 
-// pack addr & len of value 2 uint64
-func seeklenPack(seek, lenv uint32) uint64 {
-	p := make([]byte, 8)
-	p[0] = byte(seek >> 24)
-	p[1] = byte(seek >> 16)
-	p[2] = byte(seek >> 8)
-	p[3] = byte(seek)
-	p[4] = byte(lenv >> 24)
-	p[5] = byte(lenv >> 16)
-	p[6] = byte(lenv >> 8)
-	p[7] = byte(lenv)
-	return binary.BigEndian.Uint64(p)
+// pack addr & size of packet to uint32
+func addrsizePack(addr uint32, size uint8) uint32 {
+	/*p := make([]byte, 4)
+	p[0] = size
+	p[1] = byte(addr >> 16)
+	p[2] = byte(addr >> 8)
+	p[3] = byte(addr)
+	return binary.BigEndian.Uint32(p)*/
+	p := make([]byte, 4)
+	//мы пишем в 3 бита хвостик от степени двойки
+	// а 5 бит используем для хранения размера пакета в степенях двойки (2^5) максимум 2^32()
+	// 7 это битовая маска
+	p[0] = (size << 3) | (byte(addr>>24) & 7)
+	p[1] = byte(addr >> 16)
+	p[2] = byte(addr >> 8)
+	p[3] = byte(addr)
+	return binary.BigEndian.Uint32(p)
 }
 
-// unpack addr & len
-func seeklenUnpack(seeklen uint64) (seek, lenv uint32) {
-	p := make([]byte, 8)
-	binary.BigEndian.PutUint64(p, seeklen)
-	return binary.BigEndian.Uint32(p[:4]), binary.BigEndian.Uint32(p[4:8])
+// unpack addr & size of packet
+func addrsizeUnpack(addrsize uint32) (addr, size uint32) {
+	p := make([]byte, 4)
+	binary.BigEndian.PutUint32(p, addrsize)
+	size = (1 << (p[0] >> 3))
+	p[0] = p[0] & 7
+	return binary.BigEndian.Uint32(p), size
+	/*p := make([]byte, 4)
+	binary.BigEndian.PutUint32(p, addrsize)
+	size = (1 << p[0])
+	p[0] = 0
+	return binary.BigEndian.Uint32(p), size*/
 }
 
-// Set - calc chunk idx and write in it
-func (s *Store) Set(k, v []byte) (err error) {
-	h := xxhash.Sum64(k)
-	idx := h % chunksCount
-	return s.chunks[idx].set(k, v, h)
+func idx(h uint32) uint32 {
+	return (h % (chunksCnt - chunkColCnt)) + chunkColCnt
 }
 
-// set - write data to file & in map
-func (c *chunk) set(k, v []byte, h uint64) (err error) {
-	c.Lock()
-	defer c.Unlock()
-
+func packetMarshal(k, v []byte) (sizeb byte, b []byte) {
 	// write head
-	vp, vs := NextPowerOf2(uint32(len(v) + len(k)))
-	size := sizeHead + int(vs)
-	b := make([]byte, size)
-	b[0] = vp
+	sizeb, size := NextPowerOf2(uint32(len(v) + len(k) + sizeHead))
+	b = make([]byte, size)
+	b[0] = sizeb
 	b[1] = byte(0)
 	//len key in bigendian format
 	lenk := uint16(len(k))
@@ -193,31 +230,71 @@ func (c *chunk) set(k, v []byte, h uint64) (err error) {
 	// write body: val and key
 	copy(b[sizeHead:], v)
 	copy(b[sizeHead+lenv:], k)
+	return
+}
 
+func packetUnmarshal(packet []byte) (k, v []byte, sizeb byte) {
+	_ = packet[7]
+	sizeb = packet[0]
+	lenk := binary.BigEndian.Uint16(packet[2:4])
+	lenv := binary.BigEndian.Uint32(packet[4:8])
+	k = packet[sizeHead+lenv : sizeHead+lenv+uint32(lenk)]
+	v = packet[sizeHead : sizeHead+lenv]
+	return
+}
+
+// Set - calc chunk idx and write in it
+func (s *Store) Set(k, v []byte) (err error) {
+	h := hash(k) //xxhash.Sum64(k)
+	idx := idx(h)
+	err = s.chunks[idx].set(k, v, h)
+	if err == errCollision {
+		for i := 0; i < chunkColCnt; i++ {
+			err = s.chunks[i].set(k, v, h)
+			if err == errCollision {
+				continue
+			}
+			break
+		}
+	}
+	return
+}
+
+// set - write data to file & in map
+func (c *chunk) set(k, v []byte, h uint32) (err error) {
+	c.Lock()
+	defer c.Unlock()
+	sizeb, b := packetMarshal(k, v)
 	// write at file
 	pos := int64(-1)
 
-	if seeklen, ok := c.m[h]; ok {
-		seek, _ := seeklenUnpack(seeklen)
-		sizeold := make([]byte, 1)
-		_, err := c.f.ReadAt(sizeold, int64(seek))
+	if addrsize, ok := c.m[h]; ok {
+		addr, size := addrsizeUnpack(addrsize)
+		packet := make([]byte, size)
+		_, err = c.f.ReadAt(packet, int64(addr))
 		if err != nil {
-			return err
+			return
 		}
-		if err == nil && sizeold[0] == vp {
+		key, _, sizeold := packetUnmarshal(packet)
+		if !bytes.Equal(key, k) {
+			//println(string(key), string(k))
+			return errCollision
+		}
+
+		if err == nil && sizeold == sizeb {
 			//overwrite
-			pos = int64(seek)
+			pos = int64(addr)
 		} else {
 			// mark old k/v as deleted
 			delb := make([]byte, 1)
 			delb[0] = deleted
-			c.f.WriteAt(delb, int64(seek+1))
+			c.f.WriteAt(delb, int64(addr+1))
 
-			c.h[seek] = sizeold[0]
+			c.h[addr] = sizeold
 
 			// try to find optimal empty hole
 			for addrh, sizeh := range c.h {
-				if sizeh == vp {
+				if sizeh == sizeb {
 					pos = int64(addrh)
 					delete(c.h, addrh)
 					break
@@ -230,26 +307,55 @@ func (c *chunk) set(k, v []byte, h uint64) (err error) {
 		pos, err = c.f.Seek(0, 2) // append to the end of file
 	}
 	c.f.WriteAt(b, pos)
-	c.m[h] = seeklenPack(uint32(pos), lenv)
+	c.m[h] = addrsizePack(uint32(pos), sizeb)
 	return
 }
 
 // Get - calc chunk idx and get from it
 func (s *Store) Get(k []byte) (v []byte, err error) {
-	h := xxhash.Sum64(k)
-	idx := h % chunksCount
-	return s.chunks[idx].get(k, h)
+	h := hash(k)
+	idx := idx(h)
+	v, err = s.chunks[idx].get(k, h)
+	if err == errNotFound {
+		println(err.Error(), string(k), idx)
+	}
+	if err == errCollision {
+		for i := 0; i < chunkColCnt; i++ {
+
+			v, err = s.chunks[i].get(k, h)
+			if err == errNotFound {
+				println(i, err.Error(), string(k), idx, i)
+			}
+			if err == errCollision || err == errNotFound {
+				continue
+			}
+			break
+		}
+	}
+	return
 }
 
 // get return val by key
-func (c *chunk) get(k []byte, h uint64) (v []byte, err error) {
+func (c *chunk) get(k []byte, h uint32) (v []byte, err error) {
 	c.RLock()
 	defer c.RUnlock()
-	if seeklen, ok := c.m[h]; ok {
-		seek, lenv := seeklenUnpack(seeklen)
-
-		v = make([]byte, lenv)
-		_, err = c.f.ReadAt(v, int64(seek+sizeHead))
+	if addrsize, ok := c.m[h]; ok {
+		//p := make([]byte, 4)
+		//binary.BigEndian.PutUint32(p, addrsize)
+		//fmt.Printf("kv:%+v\n", p)
+		addr, size := addrsizeUnpack(addrsize)
+		//println("addr,size", addr, size, h)
+		packet := make([]byte, size)
+		_, err = c.f.ReadAt(packet, int64(addr))
+		if err != nil {
+			return
+		}
+		key, val, _ := packetUnmarshal(packet)
+		//println("get", string(key), string(k), h)
+		if !bytes.Equal(key, k) {
+			return nil, errCollision
+		}
+		v = val
 	} else {
 		return nil, errNotFound
 	}
@@ -353,32 +459,32 @@ func NextPowerOf2(v uint32) (power byte, val uint32) {
 
 // Delete - delete item by key
 func (s *Store) Delete(k []byte) (bool, error) {
-	h := xxhash.Sum64(k)
-	idx := h % chunksCount
+	h := hash(k)
+	idx := idx(h)
 	return s.chunks[idx].delete(k, h)
 }
 
 // delete mark item as deleted at specified position
-func (c *chunk) delete(k []byte, h uint64) (isDeleted bool, err error) {
+func (c *chunk) delete(k []byte, h uint32) (isDeleted bool, err error) {
 	c.Lock()
 	defer c.Unlock()
-	if seeklen, ok := c.m[h]; ok {
-		seek, _ := seeklenUnpack(seeklen)
+	if addrsize, ok := c.m[h]; ok {
+		addr, _ := addrsizeUnpack(addrsize)
 
 		sizeold := make([]byte, 1)
-		_, err = c.f.ReadAt(sizeold, int64(seek))
+		_, err = c.f.ReadAt(sizeold, int64(addr))
 		if err != nil {
 			return
 		}
 
 		delb := make([]byte, 1)
 		delb[0] = deleted
-		_, err = c.f.WriteAt(delb, int64(seek+1))
+		_, err = c.f.WriteAt(delb, int64(addr+1))
 		if err != nil {
 			return
 		}
 		delete(c.m, h)
-		c.h[seek] = sizeold[0]
+		c.h[addr] = sizeold[0]
 		isDeleted = true
 	}
 	return
@@ -387,20 +493,20 @@ func (c *chunk) delete(k []byte, h uint64) (isDeleted bool, err error) {
 // Incr - Incr item by uint64
 // inited with zero
 func (s *Store) Incr(k []byte, v uint64) (uint64, error) {
-	h := xxhash.Sum64(k)
-	idx := h % chunksCount
+	h := hash(k)
+	idx := idx(h)
 	return s.chunks[idx].incrdecr(k, h, v, true)
 }
 
 // Decr - Decr item by uint64
 // inited with zero
 func (s *Store) Decr(k []byte, v uint64) (uint64, error) {
-	h := xxhash.Sum64(k)
-	idx := h % chunksCount
+	h := hash(k)
+	idx := idx(h)
 	return s.chunks[idx].incrdecr(k, h, v, false)
 }
 
-func (c *chunk) incrdecr(k []byte, h, v uint64, isIncr bool) (counter uint64, err error) {
+func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uint64, err error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 	old, err := c.get(k, h)
@@ -465,4 +571,19 @@ func (c *chunk) backup() (err error) {
 	}
 	dest.Sync()
 	return dest.Close()
+}
+
+func readUint32(b []byte) uint32 {
+	_ = b[3]
+	return uint32(b[3]) | uint32(b[2])<<8 | uint32(b[1])<<16 | uint32(b[0])<<24
+}
+
+func appendUint32(b []byte, x uint32) []byte {
+	a := [4]byte{
+		byte(x >> 24),
+		byte(x >> 16),
+		byte(x >> 8),
+		byte(x),
+	}
+	return append(b, a[:]...)
 }

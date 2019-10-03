@@ -4,16 +4,55 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"math/rand"
 	"os"
 	"runtime"
 	"testing"
-	"time"
 
+	"github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/lotsa"
 )
 
+func TestPack(t *testing.T) {
+	addr := 1<<26 - 5
+	size := byte(5)
+	some32 := addrsizePack(uint32(addr), size)
+	println("some32", some32)
+	s, l := addrsizeUnpack(some32)
+	if s != uint32(addr) || l != 32 {
+		t.Errorf("get addr = %d, size=%d want 60000,4", s, l)
+	}
+}
+
+func TestHashCol(t *testing.T) {
+	//get: k:[110 111 104 101 111 111 109 122 121 122] key:[105 113 101 118 119 122 113 116 99 116] val: [0 0 0 0 0 6 157 19]
+	//k1 := []byte{110, 111, 104, 101, 111, 111, 109, 122, 121, 122}
+	//k2 := []byte{105, 113, 101, 118, 119, 122, 113, 116, 99, 11}
+	println(1 << 32)
+	k2 := make([]byte, 8)
+	binary.BigEndian.PutUint64(k2, uint64(16_123_243))
+	k3 := make([]byte, 8)
+	binary.BigEndian.PutUint64(k3, uint64(106_987_520))
+	println(hash(k2), hash(k3))
+	//mgdbywinfo uzmqkfjche 720448991
+	println("str", hash([]byte("mgdbywinfo")), hash([]byte("uzmqkfjche")))
+	//		 4_294_967_296
+	sizet := 1_000_000
+	m := make(map[uint32]int, sizet)
+	for i := 0; i < sizet; i++ {
+		k1 := make([]byte, 8)
+		binary.BigEndian.PutUint64(k1, uint64(i))
+		h := hash(k1)
+		if _, ok := m[h]; ok {
+			println("collision", h, i, m[h])
+			break
+		}
+		m[h] = i
+	}
+
+}
 func TestPower(t *testing.T) {
 
 	p, v := NextPowerOf2(256)
@@ -53,9 +92,12 @@ func TestCmd(t *testing.T) {
 
 	err = s.Set([]byte("hello"), []byte("world"))
 	assert.NoError(t, err)
+
 	res, err := s.Get([]byte("hello"))
 	assert.NoError(t, err)
+
 	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
+
 	assert.Equal(t, 1, s.Count())
 
 	err = s.Close()
@@ -107,12 +149,22 @@ func randKey(rnd *rand.Rand, n int) []byte {
 	}
 	return s
 }
+
+func TestGet(t *testing.T) {
+	s, err := Open("1")
+	if err != nil {
+		panic(err)
+	}
+	v, err := s.Get([]byte("uzmqkfjche"))
+	println(err.Error(), v)
+	s.Close()
+}
 func TestSniperSpeed(t *testing.T) {
 
-	seed := time.Now().UnixNano()
+	seed := int64(1570109110136449000) //time.Now().UnixNano() //1570108152262917000
 	// println(seed)
 	rng := rand.New(rand.NewSource(seed))
-	N := 1_000_000
+	N := 10_000_000
 	K := 10
 
 	fmt.Printf("\n")
@@ -137,33 +189,62 @@ func TestSniperSpeed(t *testing.T) {
 	lotsa.Output = os.Stdout
 	lotsa.MemUsage = true
 
+	println("-- murmur3 --")
+	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
+		murmur3.Sum32WithSeed(keys[i], 0)
+	})
+
+	println("-- fnv1 --")
+	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
+		hash32a := fnv.New32()
+		hash32a.Write(keys[i])
+		hash32a.Sum32()
+	})
+
 	println("-- sniper --")
 	DeleteStore("1")
 	s, _ := Open("1")
 	print("set: ")
+	coll := 0
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		b := make([]byte, 8)
 		binary.BigEndian.PutUint64(b, uint64(i))
-		s.Set(keys[i], b)
+		//println("set", i, keys[i], b)
+		err := s.Set(keys[i], b)
+		if err == errCollision {
+			coll++
+			err = nil
+		}
+		if err != nil {
+			panic(err)
+		}
 	})
+	println("setcol:", coll)
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024))
+	coll = 0
 	print("get: ")
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		b, err := s.Get(keys[i])
 		if err != nil {
+			println("errget", string(keys[i]))
 			panic(err)
 		}
 		v := binary.BigEndian.Uint64(b)
 
 		if uint64(i) != v {
+			println("bad news:", string(keys[i]), i, v)
 			panic("bad news")
 		}
 	})
+	println("getcol:", coll)
 
 	print("del: ")
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
-		s.Delete(keys[i])
+		//s.Delete(keys[i])
 	})
-	DeleteStore("1")
+	//DeleteStore("1")
 	println()
 
 	//uncomment for badger test
