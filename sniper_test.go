@@ -19,10 +19,16 @@ func TestPack(t *testing.T) {
 	addr := 1<<26 - 5
 	size := byte(5)
 	some32 := addrsizePack(uint32(addr), size)
-	println("some32", some32)
 	s, l := addrsizeUnpack(some32)
 	if s != uint32(addr) || l != 32 {
 		t.Errorf("get addr = %d, size=%d want 60000,4", s, l)
+	}
+	addr = 1<<28 - 1
+	size = byte(19)
+	maxAddrSize := addrsizePack(uint32(addr), size)
+	s, l = addrsizeUnpack(maxAddrSize)
+	if s != uint32(addr) || l != 524288 {
+		t.Errorf("get addr = %d, size=%d ", s, l)
 	}
 }
 

@@ -25,7 +25,6 @@ var errNotFound = errors.New("Error key not found")
 var errCollision = errors.New("Error hash collision")
 var counters sync.Map
 var mutex = &sync.RWMutex{} //global mutex for counters and so on
-//var hash32a = fnv.New32a()
 
 // Store struct
 // data sharded by chunks
@@ -175,18 +174,13 @@ func Open(dir string) (s *Store, err error) {
 }
 
 // pack addr & size of packet to uint32
+// max packet size is 2^19, 512kb (524288)
+// min packet size is 16 byte (8 byte header+ 1 byte key, NextPowerOf2 - 4 (2^4 = 16))
+// max addr is 2^28-1, 256 Mb -1
 func addrsizePack(addr uint32, size uint8) uint32 {
-	/*p := make([]byte, 4)
-	p[0] = size
-	p[1] = byte(addr >> 16)
-	p[2] = byte(addr >> 8)
-	p[3] = byte(addr)
-	return binary.BigEndian.Uint32(p)*/
+	size = size - 4 //16 - maximum value, encoded in 4 bit, but minimum packet size is 16
 	p := make([]byte, 4)
-	//мы пишем в 3 бита хвостик от степени двойки
-	// а 5 бит используем для хранения размера пакета в степенях двойки (2^5) максимум 2^32()
-	// 7 это битовая маска
-	p[0] = (size << 3) | (byte(addr>>24) & 7)
+	p[0] = (size << 4) | (byte(addr>>24) & 15) //15 - bitmask for 00001111
 	p[1] = byte(addr >> 16)
 	p[2] = byte(addr >> 8)
 	p[3] = byte(addr)
@@ -197,14 +191,9 @@ func addrsizePack(addr uint32, size uint8) uint32 {
 func addrsizeUnpack(addrsize uint32) (addr, size uint32) {
 	p := make([]byte, 4)
 	binary.BigEndian.PutUint32(p, addrsize)
-	size = (1 << (p[0] >> 3))
-	p[0] = p[0] & 7
+	size = (1 << ((p[0] >> 4) + 4))
+	p[0] = p[0] & 15
 	return binary.BigEndian.Uint32(p), size
-	/*p := make([]byte, 4)
-	binary.BigEndian.PutUint32(p, addrsize)
-	size = (1 << p[0])
-	p[0] = 0
-	return binary.BigEndian.Uint32(p), size*/
 }
 
 func idx(h uint32) uint32 {
