@@ -12,17 +12,17 @@ import (
 	"github.com/spaolacci/murmur3"
 )
 
-//max chunk size 128Mb
-const chunksCnt = 16  //must be more then zero
+//max chunk size 256Mb
+const chunksCnt = 256 //must be more then zero
 const chunkColCnt = 4 // chunks for collisions
 const fileMode = 0666
 const dirMode = 0777
 const sizeHead = 8
 const deleted = 42 // flag for removed, tribute 2 dbf!
 
-var errFormat = errors.New("Unexpected file format")
-var errNotFound = errors.New("Error key not found")
-var errCollision = errors.New("Error hash collision")
+var errFormat = errors.New("Error, unexpected file format")
+var errNotFound = errors.New("Error, key not found")
+var errCollision = errors.New("Error, hash collision") // don't happen, on top layer of database
 var counters sync.Map
 var mutex = &sync.RWMutex{} //global mutex for counters and so on
 
@@ -44,26 +44,10 @@ type chunk struct {
 func hash(b []byte) uint32 {
 	return murmur3.Sum32WithSeed(b, 0)
 	/*
-			//MASK_24 := uint32((1 << 24) - 1)
-		//hash32a.Reset()
-		//tab := crc32.IEEE simpleMakeTable(IEEE)
-		//h := fnv.New32()
-		return murmur3.Sum32WithSeed(b, 0)
-		//mur := murmur3.New32()
-		//mur.Write(b)
-		//h32 := mur.Sum32()
-		//h32 := xxh.Checksum32(b)
-		//h.Reset()
-		//h.Write(b)
-		//h32 := h.Sum32()
-		//println(h32)
-		//return h32
-
-		//hash32a :=
-		//hash32a.Write(b)
+		convert to 24 bit hash
+		//MASK_24 := uint32((1 << 24) - 1)
 		//ss := h.Sum32()
 		//hash := (ss >> 24) ^ (ss & MASK_24)
-		//return hash32a.Sum32()
 	*/
 }
 
@@ -136,7 +120,9 @@ func (c *chunk) Init(name string) (err error) {
 }
 
 // Open return new store
-// dir will be created
+// It will create 256 shards
+// Each shard store keys and val size and address in map[uint32]uint32
+//
 func Open(dir string) (s *Store, err error) {
 	s = &Store{}
 
@@ -169,11 +155,10 @@ func Open(dir string) (s *Store, err error) {
 			return
 		}
 	}
-	println("Opened")
 	return
 }
 
-// pack addr & size of packet to uint32
+// pack addr & size of packet to uint32, triky way
 // max packet size is 2^19, 512kb (524288)
 // min packet size is 16 byte (8 byte header+ 1 byte key, NextPowerOf2 - 4 (2^4 = 16))
 // max addr is 2^28-1, 256 Mb -1
@@ -232,9 +217,11 @@ func packetUnmarshal(packet []byte) (k, v []byte, sizeb byte) {
 	return
 }
 
-// Set - calc chunk idx and write in it
+// Set - store key and val in shard
+// max packet size is 2^19, 512kb (524288)
+// packet size = len(key) + len(val) + 8
 func (s *Store) Set(k, v []byte) (err error) {
-	h := hash(k) //xxhash.Sum64(k)
+	h := hash(k)
 	idx := idx(h)
 	err = s.chunks[idx].set(k, v, h)
 	if err == errCollision {
@@ -300,21 +287,14 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 	return
 }
 
-// Get - calc chunk idx and get from it
+// Get - return val by key
 func (s *Store) Get(k []byte) (v []byte, err error) {
 	h := hash(k)
 	idx := idx(h)
 	v, err = s.chunks[idx].get(k, h)
-	if err == errNotFound {
-		println(err.Error(), string(k), idx)
-	}
 	if err == errCollision {
 		for i := 0; i < chunkColCnt; i++ {
-
 			v, err = s.chunks[i].get(k, h)
-			if err == errNotFound {
-				println(i, err.Error(), string(k), idx, i)
-			}
 			if err == errCollision || err == errNotFound {
 				continue
 			}
@@ -329,18 +309,13 @@ func (c *chunk) get(k []byte, h uint32) (v []byte, err error) {
 	c.RLock()
 	defer c.RUnlock()
 	if addrsize, ok := c.m[h]; ok {
-		//p := make([]byte, 4)
-		//binary.BigEndian.PutUint32(p, addrsize)
-		//fmt.Printf("kv:%+v\n", p)
 		addr, size := addrsizeUnpack(addrsize)
-		//println("addr,size", addr, size, h)
 		packet := make([]byte, size)
 		_, err = c.f.ReadAt(packet, int64(addr))
 		if err != nil {
 			return
 		}
 		key, val, _ := packetUnmarshal(packet)
-		//println("get", string(key), string(k), h)
 		if !bytes.Equal(key, k) {
 			return nil, errCollision
 		}
@@ -447,10 +422,20 @@ func NextPowerOf2(v uint32) (power byte, val uint32) {
 }
 
 // Delete - delete item by key
-func (s *Store) Delete(k []byte) (bool, error) {
+func (s *Store) Delete(k []byte) (isDeleted bool, err error) {
 	h := hash(k)
 	idx := idx(h)
-	return s.chunks[idx].delete(k, h)
+	isDeleted, err = s.chunks[idx].delete(k, h)
+	if err == errCollision {
+		for i := 0; i < chunkColCnt; i++ {
+			isDeleted, err = s.chunks[i].delete(k, h)
+			if err == errCollision || err == errNotFound {
+				continue
+			}
+			break
+		}
+	}
+	return
 }
 
 // delete mark item as deleted at specified position
@@ -458,12 +443,15 @@ func (c *chunk) delete(k []byte, h uint32) (isDeleted bool, err error) {
 	c.Lock()
 	defer c.Unlock()
 	if addrsize, ok := c.m[h]; ok {
-		addr, _ := addrsizeUnpack(addrsize)
-
-		sizeold := make([]byte, 1)
-		_, err = c.f.ReadAt(sizeold, int64(addr))
+		addr, size := addrsizeUnpack(addrsize)
+		packet := make([]byte, size)
+		_, err = c.f.ReadAt(packet, int64(addr))
 		if err != nil {
 			return
+		}
+		key, _, sizeb := packetUnmarshal(packet)
+		if !bytes.Equal(key, k) {
+			return false, errCollision
 		}
 
 		delb := make([]byte, 1)
@@ -473,7 +461,7 @@ func (c *chunk) delete(k []byte, h uint32) (isDeleted bool, err error) {
 			return
 		}
 		delete(c.m, h)
-		c.h[addr] = sizeold[0]
+		c.h[addr] = sizeb
 		isDeleted = true
 	}
 	return
@@ -495,6 +483,7 @@ func (s *Store) Decr(k []byte, v uint64) (uint64, error) {
 	return s.chunks[idx].incrdecr(k, h, v, false)
 }
 
+// TODO - optimize
 func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uint64, err error) {
 	mutex.Lock()
 	defer mutex.Unlock()
@@ -525,8 +514,8 @@ func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uin
 	return
 }
 
-// Backup remove files with same name with bak extension
-// and create new backup
+// Backup is very stupid now. It remove files with same name with bak extension
+// and create new backup files
 func (s *Store) Backup() (err error) {
 	for i := range s.chunks[:] {
 		err = s.chunks[i].backup()

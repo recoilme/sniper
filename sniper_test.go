@@ -240,7 +240,7 @@ func TestSniperSpeed(t *testing.T) {
 		v := binary.BigEndian.Uint64(b)
 
 		if uint64(i) != v {
-			println("bad news:", string(keys[i]), i, v)
+			println("get error:", string(keys[i]), i, v)
 			panic("bad news")
 		}
 	})
@@ -248,9 +248,9 @@ func TestSniperSpeed(t *testing.T) {
 
 	print("del: ")
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
-		//s.Delete(keys[i])
+		s.Delete(keys[i])
 	})
-	//DeleteStore("1")
+	DeleteStore("1")
 	println()
 
 	//uncomment for badger test
