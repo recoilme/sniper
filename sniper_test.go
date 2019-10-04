@@ -21,7 +21,7 @@ func TestPack(t *testing.T) {
 	some32 := addrsizePack(uint32(addr), size)
 	s, l := addrsizeUnpack(some32)
 	if s != uint32(addr) || l != 32 {
-		t.Errorf("get addr = %d, size=%d want 60000,4", s, l)
+		t.Errorf("get addr = %d, size=%d", s, l)
 	}
 	addr = 1<<28 - 1
 	size = byte(19)
@@ -33,17 +33,14 @@ func TestPack(t *testing.T) {
 }
 
 func TestHashCol(t *testing.T) {
-	//get: k:[110 111 104 101 111 111 109 122 121 122] key:[105 113 101 118 119 122 113 116 99 116] val: [0 0 0 0 0 6 157 19]
-	//k1 := []byte{110, 111, 104, 101, 111, 111, 109, 122, 121, 122}
-	//k2 := []byte{105, 113, 101, 118, 119, 122, 113, 116, 99, 11}
 	println(1 << 32)
 	k2 := make([]byte, 8)
 	binary.BigEndian.PutUint64(k2, uint64(16_123_243))
 	k3 := make([]byte, 8)
 	binary.BigEndian.PutUint64(k3, uint64(106_987_520))
-	println(hash(k2), hash(k3))
+	//println(hash(k2), hash(k3))
 	//mgdbywinfo uzmqkfjche 720448991
-	println("str", hash([]byte("mgdbywinfo")), hash([]byte("uzmqkfjche")))
+	//println("str", hash([]byte("mgdbywinfo")), hash([]byte("uzmqkfjche")))
 	//		 4_294_967_296
 	sizet := 1_000_000
 	m := make(map[uint32]int, sizet)
@@ -156,21 +153,12 @@ func randKey(rnd *rand.Rand, n int) []byte {
 	return s
 }
 
-func TestGet(t *testing.T) {
-	s, err := Open("1")
-	if err != nil {
-		panic(err)
-	}
-	v, err := s.Get([]byte("uzmqkfjche"))
-	println(err.Error(), v)
-	s.Close()
-}
 func TestSniperSpeed(t *testing.T) {
 
 	seed := int64(1570109110136449000) //time.Now().UnixNano() //1570108152262917000
 	// println(seed)
 	rng := rand.New(rand.NewSource(seed))
-	N := 10_000_000
+	N := 1_000_000
 	K := 10
 
 	fmt.Printf("\n")

@@ -4,8 +4,6 @@
 
 A simple and efficient thread-safe key/value store for Go.
 
-Under the hood `sniper` uses 
-[xxhash](https://github.com/cespare/xxhash).
 
 # Getting Started
 
@@ -48,9 +46,9 @@ go version go1.13 darwin/amd64 (Macbook Early 2015)
 
 -- sniper --
 
-set: 1,000,000 ops over 4 threads in 4983ms, 200,681/sec, 4983 ns/op, 69.3 MB, 72 bytes/op
-get: 1,000,000 ops over 4 threads in 2000ms, 500,099/sec, 1999 ns/op, 7.6 MB, 8 bytes/op
-del: 1,000,000 ops over 4 threads in 4689ms, 213,281/sec, 4688 ns/op, 33.5 MB, 35 bytes/op
+set: 1,000,000 ops over 4 threads in 4159ms, 240,455/sec, 4158 ns/op, 57.7 MB, 60 bytes/op
+get: 1,000,000 ops over 4 threads in 1988ms, 502,997/sec, 1988 ns/op, 30.5 MB, 32 bytes/op
+del: 1,000,000 ops over 4 threads in 4430ms, 225,729/sec, 4430 ns/op, 29.0 MB, 30 bytes/op
 
 -- badger --
 
