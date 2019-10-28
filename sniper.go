@@ -343,11 +343,16 @@ func (c *chunk) count() int {
 
 // Close - close related chunks
 func (s *Store) Close() (err error) {
+	errStr := ""
 	for i := range s.chunks[:] {
 		err = s.chunks[i].close()
 		if err != nil {
+			errStr += err.Error() + "\r\n"
 			return
 		}
+	}
+	if errStr != "" {
+		return errors.New(errStr)
 	}
 	return
 }
