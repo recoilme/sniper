@@ -18,15 +18,15 @@ import (
 func TestPack(t *testing.T) {
 	addr := 1<<26 - 5
 	size := byte(5)
-	some32 := addrsizePack(uint32(addr), size)
-	s, l := addrsizeUnpack(some32)
+	some32 := addrSizeMarshal(uint32(addr), size)
+	s, l := addrSizeUnmarshal(some32)
 	if s != uint32(addr) || l != 32 {
 		t.Errorf("get addr = %d, size=%d", s, l)
 	}
 	addr = 1<<28 - 1
 	size = byte(19)
-	maxAddrSize := addrsizePack(uint32(addr), size)
-	s, l = addrsizeUnpack(maxAddrSize)
+	maxAddrSize := addrSizeMarshal(uint32(addr), size)
+	s, l = addrSizeUnmarshal(maxAddrSize)
 	if s != uint32(addr) || l != 524288 {
 		t.Errorf("get addr = %d, size=%d ", s, l)
 	}

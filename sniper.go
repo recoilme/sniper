@@ -37,7 +37,7 @@ type Store struct {
 type chunk struct {
 	sync.RWMutex
 	f *os.File          // file storage
-	m map[uint32]uint32 // keys: hash / addr&len
+	m map[uint32]uint64 // keys: hash / addr&len
 	h map[uint32]byte   // holes: addr / size
 }
 
@@ -64,8 +64,8 @@ func (c *chunk) Init(name string) (err error) {
 		return
 	}
 	c.f = f
-	c.m = make(map[uint32]uint32)
-	c.h = make(map[uint32]uint8)
+	c.m = make(map[uint32]uint64)
+	c.h = make(map[uint32]byte)
 
 	//read if f not empty
 	if fi, e := c.f.Stat(); e == nil {
@@ -108,7 +108,7 @@ func (c *chunk) Init(name string) (err error) {
 			// map store
 			if b[1] != deleted {
 				h := hash(key)
-				c.m[h] = addrsizePack(uint32(seek), b[0])
+				c.m[h] = addrSizeMarshal(uint32(seek), b[0])
 			} else {
 				//deleted blocks store
 				c.h[uint32(seek)] = b[0] // seek / size
@@ -158,27 +158,26 @@ func Open(dir string) (s *Store, err error) {
 	return
 }
 
-// pack addr & size of packet to uint32, triky way
-// max packet size is 2^19, 512kb (524288)
-// min packet size is 16 byte (8 byte header+ 1 byte key, NextPowerOf2 - 4 (2^4 = 16))
-// max addr is 2^28-1, 256 Mb -1
-func addrsizePack(addr uint32, size uint8) uint32 {
-	size = size - 4 //16 - maximum value, encoded in 4 bit, but minimum packet size is 16
-	p := make([]byte, 4)
-	p[0] = (size << 4) | (byte(addr>>24) & 15) //15 - bitmask for 00001111
+// pack addr & size to uint64
+func addrSizeMarshal(addr uint32, size byte) uint64 {
+	p := make([]byte, 8)
+	p[0] = byte(addr >> 24)
 	p[1] = byte(addr >> 16)
 	p[2] = byte(addr >> 8)
 	p[3] = byte(addr)
-	return binary.BigEndian.Uint32(p)
+	p[4] = size
+	p[5] = 0
+	p[6] = 0
+	p[7] = 0
+	return binary.BigEndian.Uint64(p)
 }
 
-// unpack addr & size of packet
-func addrsizeUnpack(addrsize uint32) (addr, size uint32) {
-	p := make([]byte, 4)
-	binary.BigEndian.PutUint32(p, addrsize)
-	size = (1 << ((p[0] >> 4) + 4))
-	p[0] = p[0] & 15
-	return binary.BigEndian.Uint32(p), size
+// unpack addr & size
+func addrSizeUnmarshal(hashaddr uint64) (addr, size uint32) {
+	p := make([]byte, 8)
+	binary.BigEndian.PutUint64(p, hashaddr)
+
+	return binary.BigEndian.Uint32(p[:4]), 1 << p[4]
 }
 
 func idx(h uint32) uint32 {
@@ -245,7 +244,7 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 	pos := int64(-1)
 
 	if addrsize, ok := c.m[h]; ok {
-		addr, size := addrsizeUnpack(addrsize)
+		addr, size := addrSizeUnmarshal(addrsize)
 		packet := make([]byte, size)
 		_, err = c.f.ReadAt(packet, int64(addr))
 		if err != nil {
@@ -283,7 +282,7 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 		pos, err = c.f.Seek(0, 2) // append to the end of file
 	}
 	c.f.WriteAt(b, pos)
-	c.m[h] = addrsizePack(uint32(pos), sizeb)
+	c.m[h] = addrSizeMarshal(uint32(pos), sizeb)
 	return
 }
 
@@ -309,7 +308,7 @@ func (c *chunk) get(k []byte, h uint32) (v []byte, err error) {
 	c.RLock()
 	defer c.RUnlock()
 	if addrsize, ok := c.m[h]; ok {
-		addr, size := addrsizeUnpack(addrsize)
+		addr, size := addrSizeUnmarshal(addrsize)
 		packet := make([]byte, size)
 		_, err = c.f.ReadAt(packet, int64(addr))
 		if err != nil {
@@ -448,7 +447,7 @@ func (c *chunk) delete(k []byte, h uint32) (isDeleted bool, err error) {
 	c.Lock()
 	defer c.Unlock()
 	if addrsize, ok := c.m[h]; ok {
-		addr, size := addrsizeUnpack(addrsize)
+		addr, size := addrSizeUnmarshal(addrsize)
 		packet := make([]byte, size)
 		_, err = c.f.ReadAt(packet, int64(addr))
 		if err != nil {
