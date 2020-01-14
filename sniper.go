@@ -19,10 +19,13 @@ const fileMode = 0666
 const dirMode = 0777
 const sizeHead = 8
 const deleted = 42 // flag for removed, tribute 2 dbf!
+//ErrCollision -  must not happen
+var ErrCollision = errors.New("Error, hash collision")
 
-var errFormat = errors.New("Error, unexpected file format")
-var errNotFound = errors.New("Error, key not found")
-var errCollision = errors.New("Error, hash collision") // don't happen, on top layer of database
+var ErrFormat = errors.New("Error, unexpected file format")
+var ErrNotFound = errors.New("Error, key not found")
+
+//var ErrCollision = errors.New("Error, hash collision") // don't happen, on top layer of database
 var counters sync.Map
 var mutex = &sync.RWMutex{} //global mutex for counters and so on
 
@@ -87,23 +90,23 @@ func (c *chunk) Init(name string) (err error) {
 			lenk := binary.BigEndian.Uint16(b[2:4])
 			lenv := binary.BigEndian.Uint32(b[4:8])
 			if lenk == 0 {
-				return errFormat
+				return ErrFormat
 			}
 			// skip val
 			_, seekerr := c.f.Seek(int64(lenv), 1)
 			if seekerr != nil {
-				return errFormat
+				return ErrFormat
 			}
 			// read key
 			key := make([]byte, lenk)
 			n, errRead = c.f.Read(key)
 			if errRead != nil || n != int(lenk) {
-				return errFormat
+				return ErrFormat
 			}
 			shiftv := 1 << byte(b[0])                                               //2^pow
 			ret, seekerr := c.f.Seek(int64(shiftv-int(lenk)-int(lenv)-sizeHead), 1) // skip val && key
 			if seekerr != nil {
-				return errFormat
+				return ErrFormat
 			}
 			// map store
 			if b[1] != deleted {
@@ -152,7 +155,7 @@ func Open(dir string) (s *Store, err error) {
 
 		err = s.chunks[i].Init(fmt.Sprintf("%s/%d", dir, i))
 		if err != nil {
-			return
+			return nil, err
 		}
 	}
 	return
@@ -223,10 +226,10 @@ func (s *Store) Set(k, v []byte) (err error) {
 	h := hash(k)
 	idx := idx(h)
 	err = s.chunks[idx].set(k, v, h)
-	if err == errCollision {
+	if err == ErrCollision {
 		for i := 0; i < chunkColCnt; i++ {
 			err = s.chunks[i].set(k, v, h)
-			if err == errCollision {
+			if err == ErrCollision {
 				continue
 			}
 			break
@@ -253,7 +256,7 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 		key, _, sizeold := packetUnmarshal(packet)
 		if !bytes.Equal(key, k) {
 			//println(string(key), string(k))
-			return errCollision
+			return ErrCollision
 		}
 
 		if err == nil && sizeold == sizeb {
@@ -291,10 +294,10 @@ func (s *Store) Get(k []byte) (v []byte, err error) {
 	h := hash(k)
 	idx := idx(h)
 	v, err = s.chunks[idx].get(k, h)
-	if err == errCollision {
+	if err == ErrCollision {
 		for i := 0; i < chunkColCnt; i++ {
 			v, err = s.chunks[i].get(k, h)
-			if err == errCollision || err == errNotFound {
+			if err == ErrCollision || err == ErrNotFound {
 				continue
 			}
 			break
@@ -316,11 +319,11 @@ func (c *chunk) get(k []byte, h uint32) (v []byte, err error) {
 		}
 		key, val, _ := packetUnmarshal(packet)
 		if !bytes.Equal(key, k) {
-			return nil, errCollision
+			return nil, ErrCollision
 		}
 		v = val
 	} else {
-		return nil, errNotFound
+		return nil, ErrNotFound
 	}
 	return
 }
@@ -430,10 +433,10 @@ func (s *Store) Delete(k []byte) (isDeleted bool, err error) {
 	h := hash(k)
 	idx := idx(h)
 	isDeleted, err = s.chunks[idx].delete(k, h)
-	if err == errCollision {
+	if err == ErrCollision {
 		for i := 0; i < chunkColCnt; i++ {
 			isDeleted, err = s.chunks[i].delete(k, h)
-			if err == errCollision || err == errNotFound {
+			if err == ErrCollision || err == ErrNotFound {
 				continue
 			}
 			break
@@ -455,7 +458,7 @@ func (c *chunk) delete(k []byte, h uint32) (isDeleted bool, err error) {
 		}
 		key, _, sizeb := packetUnmarshal(packet)
 		if !bytes.Equal(key, k) {
-			return false, errCollision
+			return false, ErrCollision
 		}
 
 		delb := make([]byte, 1)
@@ -492,7 +495,7 @@ func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uin
 	mutex.Lock()
 	defer mutex.Unlock()
 	old, err := c.get(k, h)
-	if err == errNotFound {
+	if err == ErrNotFound {
 		//create empty counter
 		old = make([]byte, 8)
 		err = nil
