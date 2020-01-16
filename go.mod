@@ -1,4 +1,4 @@
-module github.com/recoilme/sniper
+module sniper
 
 go 1.13
 

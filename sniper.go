@@ -36,12 +36,17 @@ type Store struct {
 	dir    string
 }
 
+type addrSize struct {
+	addr uint32
+	size byte
+}
+
 // chunk
 type chunk struct {
 	sync.RWMutex
-	f *os.File          // file storage
-	m map[uint32]uint64 // keys: hash / addr&len
-	h map[uint32]byte   // holes: addr / size
+	f *os.File            // file storage
+	m map[uint32]addrSize // keys: hash / addr&len
+	h map[uint32]byte     // holes: addr / size
 }
 
 func hash(b []byte) uint32 {
@@ -67,7 +72,7 @@ func (c *chunk) Init(name string) (err error) {
 		return
 	}
 	c.f = f
-	c.m = make(map[uint32]uint64)
+	c.m = make(map[uint32]addrSize)
 	c.h = make(map[uint32]byte)
 
 	//read if f not empty
@@ -161,26 +166,14 @@ func Open(dir string) (s *Store, err error) {
 	return
 }
 
-// pack addr & size to uint64
-func addrSizeMarshal(addr uint32, size byte) uint64 {
-	p := make([]byte, 8)
-	p[0] = byte(addr >> 24)
-	p[1] = byte(addr >> 16)
-	p[2] = byte(addr >> 8)
-	p[3] = byte(addr)
-	p[4] = size
-	p[5] = 0
-	p[6] = 0
-	p[7] = 0
-	return binary.BigEndian.Uint64(p)
+// pack addr & size to addrSize
+func addrSizeMarshal(addr uint32, size byte) addrSize {
+	return addrSize{addr, size}
 }
 
 // unpack addr & size
-func addrSizeUnmarshal(hashaddr uint64) (addr, size uint32) {
-	p := make([]byte, 8)
-	binary.BigEndian.PutUint64(p, hashaddr)
-
-	return binary.BigEndian.Uint32(p[:4]), 1 << p[4]
+func addrSizeUnmarshal(as addrSize) (addr, size uint32) {
+	return as.addr, 1 << as.size
 }
 
 func idx(h uint32) uint32 {

@@ -1,12 +1,14 @@
-package bench
+package main
 
 import (
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math/rand"
 	"os"
 	"runtime"
 
+	badger "github.com/dgraph-io/badger"
 	"github.com/recoilme/sniper"
 	"github.com/tidwall/lotsa"
 )
@@ -20,11 +22,11 @@ func randKey(rnd *rand.Rand, n int) []byte {
 	return s
 }
 
-func main() {
+func seed() ([][]byte, int) {
 	seed := int64(1570109110136449000) //time.Now().UnixNano() //1570108152262917000
 	// println(seed)
 	rng := rand.New(rand.NewSource(seed))
-	N := 100_000_000
+	N := 1_000_000
 	K := 10
 
 	fmt.Printf("\n")
@@ -45,7 +47,10 @@ func main() {
 	for key := range keysm {
 		keys = append(keys, []byte(key))
 	}
+	return keys, N
+}
 
+func sniperBench(keys [][]byte, N int) {
 	lotsa.Output = os.Stdout
 	lotsa.MemUsage = true
 
@@ -70,9 +75,9 @@ func main() {
 			panic(err)
 		}
 	})
-	println("setcol:", coll)
 	var ms runtime.MemStats
 	runtime.ReadMemStats(&ms)
+
 	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024))
 	coll = 0
 	print("get: ")
@@ -89,7 +94,6 @@ func main() {
 			panic("bad news")
 		}
 	})
-	println("getcol:", coll)
 
 	print("del: ")
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
@@ -97,75 +101,84 @@ func main() {
 	})
 	sniper.DeleteStore("1")
 	println()
-
-	//uncomment for badger test
-	/*
-		DeleteStore("badger_test")
-		bd, err := newBadgerdb("badger_test")
-		if err != nil {
-			panic(err)
-		}
-		println("-- badger --")
-		print("set: ")
-
-		lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
-			txn := bd.NewTransaction(true) // Read-write txn
-			b := make([]byte, 8)
-			binary.BigEndian.PutUint64(b, uint64(i))
-
-			err = txn.SetEntry(badger.NewEntry(keys[i], b))
-			if err != nil {
-				log.Fatal(err)
-			}
-			err = txn.Commit()
-			if err != nil {
-				log.Fatal(err)
-			}
-
-		})
-
-		print("get: ")
-		lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
-			var val []byte
-			err := bd.View(func(txn *badger.Txn) error {
-				item, err := txn.Get(keys[i])
-				if err != nil {
-					return err
-				}
-				val, err = item.ValueCopy(val)
-				return err
-			})
-			if err != nil {
-				log.Fatal(err)
-			}
-			v := binary.BigEndian.Uint64(val)
-			if uint64(i) != v {
-				panic("bad news")
-			}
-		})
-
-		print("del: ")
-		lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
-			txn := bd.NewTransaction(true)
-			err := txn.Delete(keys[i])
-			if err != nil {
-				log.Fatal(err)
-			}
-			err = txn.Commit()
-			if err != nil {
-				log.Fatal(err)
-			}
-		})
-
-		DeleteStore("badger_test")
-	*/
 }
 
-/*
+func main() {
+	keys, N := seed()
+
+	sniperBench(keys, N)
+
+	//uncomment for badger test
+
+	//budgerBench(keys, N)
+}
+
+func budgerBench(keys [][]byte, N int) {
+	sniper.DeleteStore("badger_test")
+	bd, err := newBadgerdb("badger_test")
+	if err != nil {
+		panic(err)
+	}
+	println("-- badger --")
+	print("set: ")
+
+	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
+		txn := bd.NewTransaction(true) // Read-write txn
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, uint64(i))
+
+		err = txn.SetEntry(badger.NewEntry(keys[i], b))
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = txn.Commit()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+	})
+
+	print("get: ")
+	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
+		var val []byte
+		err := bd.View(func(txn *badger.Txn) error {
+			item, err := txn.Get(keys[i])
+			if err != nil {
+				return err
+			}
+			val, err = item.ValueCopy(val)
+			return err
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+		v := binary.BigEndian.Uint64(val)
+		if uint64(i) != v {
+			panic("bad news")
+		}
+	})
+
+	print("del: ")
+	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
+		txn := bd.NewTransaction(true)
+		err := txn.Delete(keys[i])
+		if err != nil {
+			log.Fatal(err)
+		}
+		err = txn.Commit()
+		if err != nil {
+			log.Fatal(err)
+		}
+	})
+
+	sniper.DeleteStore("badger_test")
+
+}
 func newBadgerdb(path string) (*badger.DB, error) {
 
 	os.MkdirAll(path, os.FileMode(0777))
 	opts := badger.DefaultOptions(path)
 	opts.SyncWrites = false
+	opts.Logger = nil
 	return badger.Open(opts)
-}*/
+}
