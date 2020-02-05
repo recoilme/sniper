@@ -42,7 +42,7 @@ s.Close()
 
 ## Performance
 
-```
+
 nofsync - throughputs
 
 | |sniper|badger|bbolt|bolt|leveldb|kv|buntdb|pebble|rocksdb|btree|map|map/memory|
@@ -64,7 +64,6 @@ nofsync - time
 |setmixed|18840|40883|66080|59456|32347|173913|28695|11814|12164|15127|9237|8173|
 |getmixed|75|428|179|169|361|2717|426|310|308|236|143|119|
 |del|17|1075|8419|7704|650|152|302|455|465|124|91|20|
-```
 
 Benchmarking conncurrent SET, GET, DELETE operations vs github.com/dgraph-io/badger v1.6.0
 
