@@ -102,6 +102,144 @@ nofsync - time
 |getmixed|75|428|179|169|361|2717|426|310|308|236|143|119|
 |del|17|1075|8419|7704|650|152|302|455|465|124|91|20|
 
+
+**redis-benchmark (no pipelining)**
+
+```
+====== PING_INLINE ======
+  100000 requests completed in 0.74 seconds
+  50 parallel clients
+  3 bytes payload
+  keep alive: 1
+
+100.00% <= 0 milliseconds
+136054.42 requests per second
+
+====== PING_BULK ======
+  100000 requests completed in 0.73 seconds
+  50 parallel clients
+  3 bytes payload
+  keep alive: 1
+
+100.00% <= 0 milliseconds
+137362.64 requests per second
+
+====== SET ======
+  100000 requests completed in 1.06 seconds
+  50 parallel clients
+  3 bytes payload
+  keep alive: 1
+
+68.10% <= 1 milliseconds
+99.06% <= 2 milliseconds
+99.96% <= 3 milliseconds
+100.00% <= 3 milliseconds
+94607.38 requests per second
+
+====== GET ======
+  100000 requests completed in 0.76 seconds
+  50 parallel clients
+  3 bytes payload
+  keep alive: 1
+
+100.00% <= 0 milliseconds
+130890.05 requests per second
+```
+
+redis-benchmark -P 100 (pipelining)
+
+```
+====== PING_INLINE ======
+  100000 requests completed in 0.04 seconds
+  50 parallel clients
+  3 bytes payload
+  keep alive: 1
+
+73.90% <= 1 milliseconds
+99.30% <= 2 milliseconds
+100.00% <= 2 milliseconds
+2777778.00 requests per second
+
+====== PING_BULK ======
+  100000 requests completed in 0.03 seconds
+  50 parallel clients
+  3 bytes payload
+  keep alive: 1
+
+77.90% <= 1 milliseconds
+100.00% <= 1 milliseconds
+3030303.00 requests per second
+
+====== SET ======
+  100000 requests completed in 0.37 seconds
+  50 parallel clients
+  3 bytes payload
+  keep alive: 1
+
+0.00% <= 1 milliseconds
+0.40% <= 2 milliseconds
+1.30% <= 3 milliseconds
+2.80% <= 4 milliseconds
+6.70% <= 5 milliseconds
+10.20% <= 6 milliseconds
+14.00% <= 7 milliseconds
+18.40% <= 8 milliseconds
+23.10% <= 9 milliseconds
+28.00% <= 10 milliseconds
+32.60% <= 11 milliseconds
+36.90% <= 12 milliseconds
+41.25% <= 13 milliseconds
+45.95% <= 14 milliseconds
+50.55% <= 15 milliseconds
+54.64% <= 16 milliseconds
+57.74% <= 17 milliseconds
+61.83% <= 18 milliseconds
+65.73% <= 19 milliseconds
+70.13% <= 20 milliseconds
+74.13% <= 21 milliseconds
+77.51% <= 22 milliseconds
+80.51% <= 23 milliseconds
+82.81% <= 24 milliseconds
+85.01% <= 25 milliseconds
+87.11% <= 26 milliseconds
+89.01% <= 27 milliseconds
+90.71% <= 28 milliseconds
+91.91% <= 29 milliseconds
+93.41% <= 30 milliseconds
+94.21% <= 31 milliseconds
+94.91% <= 32 milliseconds
+95.41% <= 33 milliseconds
+96.30% <= 34 milliseconds
+97.00% <= 35 milliseconds
+97.70% <= 36 milliseconds
+98.10% <= 37 milliseconds
+98.30% <= 38 milliseconds
+98.40% <= 39 milliseconds
+98.90% <= 41 milliseconds
+99.20% <= 42 milliseconds
+99.30% <= 43 milliseconds
+99.40% <= 44 milliseconds
+99.50% <= 45 milliseconds
+99.60% <= 46 milliseconds
+99.70% <= 48 milliseconds
+99.80% <= 50 milliseconds
+99.90% <= 52 milliseconds
+100.00% <= 52 milliseconds
+268817.19 requests per second
+
+====== GET ======
+  100000 requests completed in 0.04 seconds
+  50 parallel clients
+  3 bytes payload
+  keep alive: 1
+
+69.60% <= 1 milliseconds
+98.10% <= 2 milliseconds
+100.00% <= 2 milliseconds
+2702702.75 requests per second
+```
+
+**Macbook Early 2015**
 Benchmarking conncurrent SET, GET, DELETE operations vs github.com/dgraph-io/badger v1.6.0
 
 ```
@@ -125,6 +263,7 @@ get: 1,000,000 ops over 4 threads in 2222ms, 450,007/sec, 2222 ns/op, 53.9 MB, 5
 del: 1,000,000 ops over 4 threads in 25292ms, 39,538/sec, 25291 ns/op, 42.2 MB, 44 bytes/op
 
 ```
+
 
 ## How it is done
 
