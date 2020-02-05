@@ -42,7 +42,42 @@ s.Close()
 
 ## Performance
 
+Benchmarking conncurrent SET, GET, DELETE operations vs github.com/dgraph-io/badger v1.6.0
 
+**MacBook Pro, 2019**
+```
+go version go1.13.6 darwin/amd64
+
+     number of cpus: 8
+     number of keys: 20_000_000
+            keysize: 10
+        random seed: 1570109110136449000
+
+-- sniper --
+set: 20,000,000 ops over 8 threads in 49968ms, 400,258/sec, 2498 ns/op, 1.3 GB, 67 bytes/op
+get: 20,000,000 ops over 8 threads in 8492ms, 2,355,030/sec, 424 ns/op, 611.8 MB, 32 bytes/op
+del: 20,000,000 ops over 8 threads in 38364ms, 521,317/sec, 1918 ns/op, 1.1 GB, 59 bytes/op
+Size on disk: 640 000 000 byte
+
+-- badger --
+set: 20,000,000 ops over 8 threads in 200468ms, 99,766/sec, 10023 ns/op, 703.6 MB, 36 bytes/op
+get: 20,000,000 ops over 8 threads in 42823ms, 467,042/sec, 2141 ns/op, 852.9 MB, 44 bytes/op
+del: 20,000,000 ops over 8 threads in 201823ms, 99,096/sec, 10091 ns/op, 2.0 GB, 106 bytes/op
+
+Size on disk: 4 745 317 924 byte
+
+
+number of keys: 100_000_000:
+-- sniper --
+set: 100,000,000 ops over 8 threads in 350252ms, 285,508/sec, 3502 ns/op, 3.0 GB, 32 bytes/op
+get: 100,000,000 ops over 8 threads in 48400ms, 2,066,111/sec, 484 ns/op, 3.0 GB, 32 bytes/op
+del: 100,000,000 ops over 8 threads in 200237ms, 499,408/sec, 2002 ns/op, 2.5 GB, 27 bytes/op
+
+-- badger --
+no results (after 2 hours, 23+ Gb on disk)
+```
+
+**[kvbench](https://github.com/recoilme/kvbench)**
 nofsync - throughputs
 
 | |sniper|badger|bbolt|bolt|leveldb|kv|buntdb|pebble|rocksdb|btree|map|map/memory|
