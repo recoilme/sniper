@@ -42,6 +42,21 @@ s.Close()
 
 ## Performance
 
+```
+MacBook Pro 2019 (Quad-Core Intel Core i7 2,8 GHz, 16 ГБ, APPLE SSD AP0512M)
+
+go version go1.14 darwin/amd64
+
+     number of cpus: 8
+     number of keys: 1000000
+            keysize: 10
+        random seed: 1570109110136449000
+
+-- sniper --
+set: 1,000,000 ops over 8 threads in 2128ms, 470,034/sec, 2127 ns/op, 38.6 MB, 40 bytes/op
+get: 1,000,000 ops over 8 threads in 367ms, 2,728,299/sec, 366 ns/op, 30.5 MB, 32 bytes/op
+del: 1,000,000 ops over 8 threads in 769ms, 1,300,189/sec, 769 ns/op, 63.3 MB, 66 bytes/op
+```
 
 ## How it is done
 
@@ -53,8 +68,7 @@ s.Close()
 ## Limitations
 
 * 512 Kb - entry size `len(key) + len(value)`
-* 64 Gb - maximum database size
-* 8 byte - header size for every entry in file
+* 1 Tb - maximum database size
 
 ## Contact
 
