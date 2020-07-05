@@ -27,7 +27,7 @@ func TestPack(t *testing.T) {
 }
 
 func TestHashCol(t *testing.T) {
-	println(1 << 32)
+	//println(1 << 32)
 	k2 := make([]byte, 8)
 	binary.BigEndian.PutUint64(k2, uint64(16_123_243))
 	k3 := make([]byte, 8)
@@ -82,8 +82,8 @@ func TestCmd(t *testing.T) {
 	assert.NoError(t, err)
 
 	s, err := Open("1")
-
 	assert.NoError(t, err)
+
 	err = s.Set([]byte("hello"), []byte("go"))
 	assert.NoError(t, err)
 
@@ -98,9 +98,14 @@ func TestCmd(t *testing.T) {
 	assert.Equal(t, 1, s.Count())
 
 	err = s.Close()
+	assert.NoError(t, err)
+
 	s, err = Open("1")
+	assert.NoError(t, err)
+
 	res, err = s.Get([]byte("hello"))
 	assert.NoError(t, err)
+
 	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
 	assert.Equal(t, 1, s.Count())
 

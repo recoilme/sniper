@@ -8,8 +8,10 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/spaolacci/murmur3"
+	"github.com/tidwall/interval"
 )
 
 //max chunk size 256Mb
@@ -44,9 +46,10 @@ type addrSize struct {
 // chunk
 type chunk struct {
 	sync.RWMutex
-	f *os.File            // file storage
-	m map[uint32]addrSize // keys: hash / addr&len
-	h map[uint32]byte     // holes: addr / size
+	f  *os.File            // file storage
+	m  map[uint32]addrSize // keys: hash / addr&len
+	h  map[uint32]byte     // holes: addr / size
+	iv interval.Interval
 }
 
 func hash(b []byte) uint32 {
@@ -75,6 +78,13 @@ func (c *chunk) Init(name string) (err error) {
 	c.m = make(map[uint32]addrSize)
 	c.h = make(map[uint32]byte)
 
+	c.iv = interval.Set(func(t time.Time) {
+		err = c.f.Sync()
+		if err != nil {
+			//not possible, if drive ok
+			fmt.Printf("Error fsync:%s\n", err)
+		}
+	}, 1*time.Second)
 	//read if f not empty
 	if fi, e := c.f.Stat(); e == nil {
 		if fi.Size() == 0 {
@@ -124,6 +134,7 @@ func (c *chunk) Init(name string) (err error) {
 			seek = int(ret)
 		}
 	}
+
 	return
 }
 
@@ -140,7 +151,6 @@ func Open(dir string) (s *Store, err error) {
 
 	// create dirs
 	_, err = os.Stat(dir)
-
 	if err != nil {
 		// file not exists - create dirs if any
 		if os.IsNotExist(err) {
@@ -244,7 +254,7 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 		packet := make([]byte, size)
 		_, err = c.f.ReadAt(packet, int64(addr))
 		if err != nil {
-			return
+			return err
 		}
 		key, _, sizeold := packetUnmarshal(packet)
 		if !bytes.Equal(key, k) {
@@ -259,8 +269,10 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 			// mark old k/v as deleted
 			delb := make([]byte, 1)
 			delb[0] = deleted
-			c.f.WriteAt(delb, int64(addr+1))
-
+			_, err = c.f.WriteAt(delb, int64(addr+1))
+			if err != nil {
+				return err
+			}
 			c.h[addr] = sizeold
 
 			// try to find optimal empty hole
@@ -277,7 +289,10 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 	if pos < 0 {
 		pos, err = c.f.Seek(0, 2) // append to the end of file
 	}
-	c.f.WriteAt(b, pos)
+	_, err = c.f.WriteAt(b, pos)
+	if err != nil {
+		return err
+	}
 	c.m[h] = addrSizeMarshal(uint32(pos), sizeb)
 	return
 }
@@ -356,6 +371,7 @@ func (s *Store) Close() (err error) {
 func (c *chunk) close() (err error) {
 	c.Lock()
 	defer c.Unlock()
+	c.iv.Clear()
 	return c.f.Close()
 }
 
