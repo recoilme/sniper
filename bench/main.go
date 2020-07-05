@@ -3,12 +3,10 @@ package main
 import (
 	"encoding/binary"
 	"fmt"
-	"log"
 	"math/rand"
 	"os"
 	"runtime"
 
-	badger "github.com/dgraph-io/badger"
 	"github.com/recoilme/sniper"
 	"github.com/tidwall/lotsa"
 )
@@ -113,6 +111,7 @@ func main() {
 	//budgerBench(keys, N)
 }
 
+/*
 func budgerBench(keys [][]byte, N int) {
 	sniper.DeleteStore("badger_test")
 	bd, err := newBadgerdb("badger_test")
@@ -182,3 +181,4 @@ func newBadgerdb(path string) (*badger.DB, error) {
 	opts.Logger = nil
 	return badger.Open(opts)
 }
+*/
