@@ -61,8 +61,8 @@ del: 1,000,000 ops over 8 threads in 769ms, 1,300,189/sec, 769 ns/op, 63.3 MB, 6
 ## How it is done
 
 * Sniper database is sharded on many chunks. Each chunk has its own lock (RW), so it supports high concurrent access on multi-core CPUs.
-* Each bucket consists of a `hash(key) -> (value addr, value size)`, map. It give database ability to store 100_000_000 of keys in ~ 4Gb of memory.
-* Hash is very short, and has collisions. Sniper has resolver for that (some special chunks).
+* Each bucket consists of a `hash(key) -> (value addr, value size)`, map. It give database ability to store 100_000_000 records in ~ 20Gb of memory.
+* Hash is very short, and has collisions. Sniper has resolver for that.
 * Efficient space reuse alghorithm. Every packet has power of 2 size, for inplace rewrite on value update and map of deleted entrys, for reusing space.
 
 ## Limitations
