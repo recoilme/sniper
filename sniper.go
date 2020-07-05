@@ -81,10 +81,10 @@ func (c *chunk) Init(name string) (err error) {
 	c.iv = interval.Set(func(t time.Time) {
 		err = c.f.Sync()
 		if err != nil {
-			//not possible, if drive ok
+			//not possible, if drive ok, may be panic here??
 			fmt.Printf("Error fsync:%s\n", err)
 		}
-	}, 1*time.Second)
+	}, 3*time.Second)
 	//read if f not empty
 	if fi, e := c.f.Stat(); e == nil {
 		if fi.Size() == 0 {

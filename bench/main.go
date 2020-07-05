@@ -24,7 +24,7 @@ func seed() ([][]byte, int) {
 	seed := int64(1570109110136449000) //time.Now().UnixNano() //1570108152262917000
 	// println(seed)
 	rng := rand.New(rand.NewSource(seed))
-	N := 1_000_000
+	N := 10_000_000
 	K := 10
 
 	fmt.Printf("\n")
@@ -52,6 +52,10 @@ func sniperBench(keys [][]byte, N int) {
 	lotsa.Output = os.Stdout
 	lotsa.MemUsage = true
 
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024))
+
 	fmt.Println("-- sniper --")
 	sniper.DeleteStore("1")
 	s, err := sniper.Open("1")
@@ -73,8 +77,6 @@ func sniperBench(keys [][]byte, N int) {
 			panic(err)
 		}
 	})
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
 
 	fmt.Printf("Alloc = %v MiB Total = %v MiB Coll=%d\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024), coll)
 	coll = 0

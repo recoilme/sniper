@@ -3,10 +3,14 @@ package sniper
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math/rand"
+	"os"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/lotsa"
 )
 
 func TestPack(t *testing.T) {
@@ -140,7 +144,7 @@ func TestCmd(t *testing.T) {
 
 	err = DeleteStore("1")
 	assert.NoError(t, err)
-
+	sniperBench(seed())
 }
 
 func randKey(rnd *rand.Rand, n int) []byte {
@@ -150,4 +154,95 @@ func randKey(rnd *rand.Rand, n int) []byte {
 		s[i] = 'a' + (s[i] % 26)
 	}
 	return s
+}
+
+func seed() ([][]byte, int) {
+	seed := int64(1570109110136449000) //time.Now().UnixNano() //1570108152262917000
+	// println(seed)
+	rng := rand.New(rand.NewSource(seed))
+	N := 10_000
+	K := 10
+
+	fmt.Printf("\n")
+	fmt.Printf("go version %s %s/%s\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("\n")
+	fmt.Printf("     number of cpus: %d\n", runtime.NumCPU())
+	fmt.Printf("     number of keys: %d\n", N)
+	fmt.Printf("            keysize: %d\n", K)
+	fmt.Printf("        random seed: %d\n", seed)
+
+	fmt.Printf("\n")
+
+	keysm := make(map[string]bool, N)
+	for len(keysm) < N {
+		keysm[string(randKey(rng, K))] = true
+	}
+	keys := make([][]byte, 0, N)
+	for key := range keysm {
+		keys = append(keys, []byte(key))
+	}
+	return keys, N
+}
+
+func sniperBench(keys [][]byte, N int) {
+	lotsa.Output = os.Stdout
+	lotsa.MemUsage = true
+
+	fmt.Println("-- sniper --")
+	DeleteStore("1")
+	s, err := Open("1")
+	if err != nil {
+		panic(err)
+	}
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+
+	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024))
+
+	fmt.Print("set: ")
+	coll := 0
+	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, uint64(i))
+		//println("set", i, keys[i], b)
+		err := s.Set(keys[i], b)
+		if err == ErrCollision {
+			coll++
+			err = nil
+		}
+		if err != nil {
+			panic(err)
+		}
+	})
+	runtime.ReadMemStats(&ms)
+
+	fmt.Printf("Alloc = %v MiB Total = %v MiB Coll=%d\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024), coll)
+	coll = 0
+	fmt.Print("get: ")
+	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
+		b, err := s.Get(keys[i])
+		if err != nil {
+			println("errget", string(keys[i]))
+			panic(err)
+		}
+		v := binary.BigEndian.Uint64(b)
+
+		if uint64(i) != v {
+			println("get error:", string(keys[i]), i, v)
+			panic("bad news")
+		}
+	})
+
+	runtime.ReadMemStats(&ms)
+
+	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024))
+
+	fmt.Print("del: ")
+	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
+		s.Delete(keys[i])
+	})
+	err = DeleteStore("1")
+	if err != nil {
+		panic("bad news")
+	}
 }
