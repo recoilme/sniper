@@ -24,7 +24,7 @@ func seed() ([][]byte, int) {
 	seed := int64(1570109110136449000) //time.Now().UnixNano() //1570108152262917000
 	// println(seed)
 	rng := rand.New(rand.NewSource(seed))
-	N := 1_000_000
+	N := 10_000_000
 	K := 10
 
 	fmt.Printf("\n")
@@ -52,13 +52,17 @@ func sniperBench(keys [][]byte, N int) {
 	lotsa.Output = os.Stdout
 	lotsa.MemUsage = true
 
-	println("-- sniper --")
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024))
+
+	fmt.Println("-- sniper --")
 	sniper.DeleteStore("1")
 	s, err := sniper.Open("1")
 	if err != nil {
 		panic(err)
 	}
-	print("set: ")
+	fmt.Print("set: ")
 	coll := 0
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		b := make([]byte, 8)
@@ -73,12 +77,10 @@ func sniperBench(keys [][]byte, N int) {
 			panic(err)
 		}
 	})
-	var ms runtime.MemStats
-	runtime.ReadMemStats(&ms)
 
-	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024))
+	fmt.Printf("Alloc = %v MiB Total = %v MiB Coll=%d\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024), coll)
 	coll = 0
-	print("get: ")
+	fmt.Print("get: ")
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		b, err := s.Get(keys[i])
 		if err != nil {
@@ -93,12 +95,17 @@ func sniperBench(keys [][]byte, N int) {
 		}
 	})
 
-	print("del: ")
+	var ms2 runtime.MemStats
+	runtime.ReadMemStats(&ms2)
+
+	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms2.Alloc / 1024 / 1024), (ms2.TotalAlloc / 1024 / 1024))
+
+	fmt.Print("del: ")
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		s.Delete(keys[i])
 	})
-	sniper.DeleteStore("1")
-	println()
+	err = sniper.DeleteStore("1")
+	fmt.Println(err)
 }
 
 func main() {
