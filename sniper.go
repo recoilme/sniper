@@ -72,7 +72,7 @@ func (c *chunk) Init(name string) (err error) {
 	}
 	err = f.Sync()
 	if err != nil {
-		return
+		return err
 	}
 	c.f = f
 	c.m = make(map[uint32]addrSize)
