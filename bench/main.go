@@ -58,7 +58,7 @@ func sniperBench(keys [][]byte, N int) {
 
 	fmt.Println("-- sniper --")
 	sniper.DeleteStore("1")
-	s, err := sniper.Open("1")
+	s, err := sniper.Open(sniper.Dir("1"))
 	if err != nil {
 		panic(err)
 	}

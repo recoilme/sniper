@@ -8,7 +8,6 @@ import (
 	"os"
 	"runtime"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/lotsa"
@@ -57,7 +56,7 @@ func TestHashCol(t *testing.T) {
 }
 func TestPower(t *testing.T) {
 
-	p, v := NextPowerOf2(256) 
+	p, v := NextPowerOf2(256)
 	if p != 8 || v != 256 {
 		t.Errorf("get p = %d,v=%d want 8,256", p, v)
 	}
