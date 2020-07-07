@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/lotsa"
@@ -56,7 +57,7 @@ func TestHashCol(t *testing.T) {
 }
 func TestPower(t *testing.T) {
 
-	p, v := NextPowerOf2(256)
+	p, v := NextPowerOf2(256) 
 	if p != 8 || v != 256 {
 		t.Errorf("get p = %d,v=%d want 8,256", p, v)
 	}
@@ -85,7 +86,7 @@ func TestCmd(t *testing.T) {
 	err := DeleteStore("1")
 	assert.NoError(t, err)
 
-	s, err := Open("1")
+	s, err := Open(Dir("1"))
 	assert.NoError(t, err)
 
 	err = s.Set([]byte("hello"), []byte("go"))
@@ -104,7 +105,7 @@ func TestCmd(t *testing.T) {
 	err = s.Close()
 	assert.NoError(t, err)
 
-	s, err = Open("1")
+	s, err = Open(Dir("1"))
 	assert.NoError(t, err)
 
 	res, err = s.Get([]byte("hello"))
@@ -160,7 +161,7 @@ func seed() ([][]byte, int) {
 	seed := int64(1570109110136449000) //time.Now().UnixNano() //1570108152262917000
 	// println(seed)
 	rng := rand.New(rand.NewSource(seed))
-	N := 10_000
+	N := 100_000
 	K := 10
 
 	fmt.Printf("\n")
@@ -190,7 +191,8 @@ func sniperBench(keys [][]byte, N int) {
 
 	fmt.Println("-- sniper --")
 	DeleteStore("1")
-	s, err := Open("1")
+	//s, err := Open(Dir("1"),SyncInterval(1*time.Second)) Игорь, попробуй вот так
+	s, err := Open(Dir("1"))
 	if err != nil {
 		panic(err)
 	}
