@@ -34,8 +34,9 @@ var mutex = &sync.RWMutex{} //global mutex for counters and so on
 // Store struct
 // data sharded by chunks
 type Store struct {
-	chunks [chunksCnt]chunk
-	dir    string
+	chunks       [chunksCnt]chunk
+	dir          string
+	syncInterval time.Duration
 }
 
 type addrSize struct {
@@ -52,6 +53,44 @@ type chunk struct {
 	iv interval.Interval
 }
 
+// Option is a function that takes a pointer to a Store and returns an error if it is invalid
+type Option func(*Store) error
+
+// SyncInterval - how often fsync do, default 0 = disabled
+func SyncInterval(interv time.Duration) Option {
+	return func(s *Store) error {
+		s.syncInterval = interv
+		return nil
+	}
+}
+
+// Dir - directory for database, default "."
+func Dir(dir string) Option {
+	return func(s *Store) error {
+		if dir == "" {
+			dir = "."
+		}
+		var err error
+		// create dirs
+		_, err = os.Stat(dir)
+		if err != nil {
+			// file not exists - create dirs if any
+			if os.IsNotExist(err) {
+				if dir != "." {
+					err = os.MkdirAll(dir, os.FileMode(dirMode))
+					if err != nil {
+						return err
+					}
+				}
+			} else {
+				return err
+			}
+		}
+		s.dir = dir
+		return nil
+	}
+}
+
 func hash(b []byte) uint32 {
 	return murmur3.Sum32WithSeed(b, 0)
 	/*
@@ -62,7 +101,7 @@ func hash(b []byte) uint32 {
 	*/
 }
 
-func (c *chunk) Init(name string) (err error) {
+func (c *chunk) init(name string, syncInterval time.Duration) (err error) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -78,13 +117,15 @@ func (c *chunk) Init(name string) (err error) {
 	c.m = make(map[uint32]addrSize)
 	c.h = make(map[uint32]byte)
 
-	c.iv = interval.Set(func(t time.Time) {
-		err = c.f.Sync()
-		if err != nil {
-			//not possible, if drive ok, may be panic here??
-			fmt.Printf("Error fsync:%s\n", err)
-		}
-	}, 3*time.Second)
+	if syncInterval>0 {
+		c.iv = interval.Set(func(t time.Time) {
+			err = c.f.Sync()
+			if err != nil {
+				//not possible, if drive ok, may be panic here??
+				fmt.Printf("Error fsync:%s\n", err)
+			}
+		}, syncInterval)
+	}
 	//read if f not empty
 	if fi, e := c.f.Stat(); e == nil {
 		if fi.Size() == 0 {
@@ -142,33 +183,24 @@ func (c *chunk) Init(name string) (err error) {
 // It will create 256 shards
 // Each shard store keys and val size and address in map[uint32]uint32
 //
-func Open(dir string) (s *Store, err error) {
+// options, see https://gist.github.com/travisjeffery/8265ca411735f638db80e2e34bdbd3ae#gistcomment-3171484
+func Open(opts ...Option) (s *Store, err error) {
 	s = &Store{}
 
-	if dir == "" {
-		dir = "."
-	}
-
-	// create dirs
-	_, err = os.Stat(dir)
-	if err != nil {
-		// file not exists - create dirs if any
-		if os.IsNotExist(err) {
-			if dir != "." {
-				err = os.MkdirAll(dir, os.FileMode(dirMode))
-				if err != nil {
-					return
-				}
-			}
-		} else {
-			return
+	s.syncInterval = 0
+	// call option functions on instance to set options on it
+	for _, opt := range opts {
+		err := opt(s)
+		// if the option func returns an error, add it to the list of errors
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	// create chuncks
 	for i := range s.chunks[:] {
 
-		err = s.chunks[i].Init(fmt.Sprintf("%s/%d", dir, i))
+		err = s.chunks[i].init(fmt.Sprintf("%s/%d", s.dir, i),s.syncInterval)
 		if err != nil {
 			return nil, err
 		}
@@ -371,7 +403,8 @@ func (s *Store) Close() (err error) {
 func (c *chunk) close() (err error) {
 	c.Lock()
 	defer c.Unlock()
-	c.iv.Clear()
+	//c.iv.Clear()
+
 	return c.f.Close()
 }
 
