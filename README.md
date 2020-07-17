@@ -28,7 +28,7 @@ This will retrieve the library.
 ## Usage
 
 The `Sniper` includes this methods:
-`Set`, `Get`, `Incr`, `Decr`, `Delete`, `Count`, `Walk`, `Open`, `Close`, `FileSize`, `Backup`.
+`Set`, `Get`, `Incr`, `Decr`, `Delete`, `Count`, `Walk` `WalkPll`, `Open`, `Close`, `FileSize`, `Backup`.
 
 ```go
 s, _ := sniper.Open("1")
@@ -39,6 +39,7 @@ s.Close()
 // Output:
 // go
 ```
+Walk:
 
 ```go
 s, _ := sniper.Open("1")
@@ -52,6 +53,29 @@ walk := func(key []byte, val []byte) bool {
 }
 
 err = s.Walk(walk)
+if err != nil {
+	fmt.Println(err)
+}
+s.Close()
+```
+Walk parallel with limit at 8 threads:
+
+```go
+var mu sync.Mutex
+
+s, _ := sniper.Open("1")
+s.Set([]byte("hello"), []byte("go"))
+s.Set([]byte("hello1"), []byte("go1"))
+s.Set([]byte("hello2"), []byte("go2"))
+
+walkpll := func(key []byte, val []byte) bool {
+	mu.Lock()
+	fmt.Printf("Key: %s ; Value: %s\n", string(key), string(val))
+	mu.Unlock()
+	return false
+}
+
+err = s.WalkPll(walkpll, 8)
 if err != nil {
 	fmt.Println(err)
 }

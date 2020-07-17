@@ -2,6 +2,7 @@ package sniper
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pieterclaerhout/go-waitgroup"
 	"github.com/spaolacci/murmur3"
 	"github.com/tidwall/interval"
 )
@@ -389,7 +391,7 @@ func (c *chunk) count() int {
 	return len(c.m)
 }
 
-// Walk return key/values on the fly to external walk app function
+// Walk sequential return key/values on the fly to external walk app function
 func (s *Store) Walk(fn WalkFn) (err error) {
 	for idx := range s.chunks[:] {
 		_, err = s.chunks[idx].walk(fn)
@@ -398,6 +400,56 @@ func (s *Store) Walk(fn WalkFn) (err error) {
 		}
 	}
 	return
+}
+
+// Walk parallel return key/values on the fly to external walk app function
+func (s *Store) WalkPll(fn WalkFn, threads int) (err error) {
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	qwait := make(chan bool)
+
+	qwg, ctx := waitgroup.NewErrorGroup(ctx, threads)
+
+Main:
+
+	for idx := range s.chunks[:] {
+
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			break Main
+		default:
+		}
+
+		qwg.Add(func() (err error) {
+
+			qidx := idx
+
+			qwait <- true
+
+			_, err = s.chunks[qidx].walk(fn)
+			if err != nil {
+				cancel()
+				return
+			}
+
+			return
+
+		})
+
+		<-qwait
+
+	}
+
+	err = qwg.Wait()
+	if err != nil {
+		return
+	}
+
+	return
+
 }
 
 // Internal sequential walk over all chunks

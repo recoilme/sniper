@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sort"
 	"testing"
+	"sync"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/lotsa"
@@ -102,21 +103,21 @@ func TestCmd(t *testing.T) {
 
 	assert.Equal(t, 1, s.Count())
 
-	err = s.Set([]byte("ahello"), []byte("aworld"))
-	assert.NoError(t, err)
-
-	err = s.Set([]byte("bhello"), []byte("bworld"))
-	assert.NoError(t, err)
-
-	err = s.Set([]byte("chello"), []byte("cworld"))
-	assert.NoError(t, err)
+	var mu sync.Mutex
 
 	var kvb bool
 
-	kls := []string{"hello", "ahello", "bhello", "chello"}
-	vls := []string{"world", "aworld", "bworld", "cworld"}
-	var kfs []string
-	var vfs []string
+	kls := []string{"hello"}
+	vls := []string{"world"}
+	kfs := []string{}
+	vfs := []string{}
+
+	for skv := 0 ; skv <= 1000 ; skv++ {
+		kls = append(kls, fmt.Sprintf("kseq%d", skv))
+		vls = append(vls, fmt.Sprintf("vseq%d", skv))
+		err = s.Set([]byte(fmt.Sprintf("kseq%d", skv)), []byte(fmt.Sprintf("vseq%d", skv)))
+		assert.NoError(t, err)
+	}
 
 	walk := func(key []byte, val []byte) bool {
 		kfs = append(kfs, string(key))
@@ -130,18 +131,57 @@ func TestCmd(t *testing.T) {
 	}
 
 	kvb = IsEqual(kls, kfs)
-	if !kvb { t.Errorf("Walk keys arrays not equal: %v, %v", kls, kfs) }
+	if !kvb {
+		t.Errorf("Walk sequential keys arrays not equal: %v, %v", kls, kfs)
+	}
 	kvb = IsEqual(vls, vfs)
-	if !kvb { t.Errorf("Walk values arrays not equal: %v, %v", vls, vfs) }
+	if !kvb {
+		t.Errorf("Walk sequential values arrays not equal: %v, %v", vls, vfs)
+	}
 
-	_, err = s.Delete([]byte("ahello"))
-	assert.NoError(t, err)
+	for skv := 0 ; skv <= 1000 ; skv++ {
+		_, err = s.Delete([]byte(fmt.Sprintf("kseq%d", skv)))
+		assert.NoError(t, err)
+	}
 
-	_, err = s.Delete([]byte("bhello"))
-	assert.NoError(t, err)
+	kls = []string{"hello"}
+	vls = []string{"world"}
+	kfs = []string{}
+	vfs = []string{}
 
-	_, err = s.Delete([]byte("chello"))
-	assert.NoError(t, err)
+	for pkv := 0 ; pkv <= 1000 ; pkv++ {
+		kls = append(kls, fmt.Sprintf("kprl%d", pkv))
+		vls = append(vls, fmt.Sprintf("vprl%d", pkv))
+		err = s.Set([]byte(fmt.Sprintf("kprl%d", pkv)), []byte(fmt.Sprintf("vprl%d", pkv)))
+		assert.NoError(t, err)
+	}
+
+	walkpll := func(key []byte, val []byte) bool {
+		mu.Lock()
+		kfs = append(kfs, string(key))
+		vfs = append(vfs, string(val))
+		mu.Unlock()
+		return false
+	}
+
+	err = s.WalkPll(walkpll, 8)
+	if err != nil {
+		t.Errorf("Walk error: %v", err)
+	}
+
+	kvb = IsEqual(kls, kfs)
+	if !kvb {
+		t.Errorf("Walk parallel keys arrays not equal: %v, %v", kls, kfs)
+	}
+	kvb = IsEqual(vls, vfs)
+	if !kvb {
+		t.Errorf("Walk parallel values arrays not equal: %v, %v", vls, vfs)
+	}
+
+	for pkv := 0 ; pkv <= 1000 ; pkv++ {
+		_, err = s.Delete([]byte(fmt.Sprintf("kprl%d", pkv)))
+		assert.NoError(t, err)
+	}
 
 	err = s.Close()
 	assert.NoError(t, err)
