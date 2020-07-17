@@ -8,8 +8,8 @@ import (
 	"os"
 	"runtime"
 	"sort"
-	"testing"
 	"sync"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/lotsa"
@@ -112,7 +112,7 @@ func TestCmd(t *testing.T) {
 	kfs := []string{}
 	vfs := []string{}
 
-	for skv := 0 ; skv <= 1000 ; skv++ {
+	for skv := 0; skv <= 1000; skv++ {
 		kls = append(kls, fmt.Sprintf("kseq%d", skv))
 		vls = append(vls, fmt.Sprintf("vseq%d", skv))
 		err = s.Set([]byte(fmt.Sprintf("kseq%d", skv)), []byte(fmt.Sprintf("vseq%d", skv)))
@@ -139,7 +139,7 @@ func TestCmd(t *testing.T) {
 		t.Errorf("Walk sequential values arrays not equal: %v, %v", vls, vfs)
 	}
 
-	for skv := 0 ; skv <= 1000 ; skv++ {
+	for skv := 0; skv <= 1000; skv++ {
 		_, err = s.Delete([]byte(fmt.Sprintf("kseq%d", skv)))
 		assert.NoError(t, err)
 	}
@@ -149,7 +149,7 @@ func TestCmd(t *testing.T) {
 	kfs = []string{}
 	vfs = []string{}
 
-	for pkv := 0 ; pkv <= 1000 ; pkv++ {
+	for pkv := 0; pkv <= 1000; pkv++ {
 		kls = append(kls, fmt.Sprintf("kprl%d", pkv))
 		vls = append(vls, fmt.Sprintf("vprl%d", pkv))
 		err = s.Set([]byte(fmt.Sprintf("kprl%d", pkv)), []byte(fmt.Sprintf("vprl%d", pkv)))
@@ -178,7 +178,7 @@ func TestCmd(t *testing.T) {
 		t.Errorf("Walk parallel values arrays not equal: %v, %v", vls, vfs)
 	}
 
-	for pkv := 0 ; pkv <= 1000 ; pkv++ {
+	for pkv := 0; pkv <= 1000; pkv++ {
 		_, err = s.Delete([]byte(fmt.Sprintf("kprl%d", pkv)))
 		assert.NoError(t, err)
 	}

@@ -465,7 +465,9 @@ func (c *chunk) walk(fn WalkFn) (bool, error) {
 				return true, ErrReadValue
 			}
 			key, val, _ := packetUnmarshal(packet)
-			fn(key, val)
+			if fn(key, val) {
+				return true, nil
+			}
 		} else {
 			return true, ErrAddrSize
 		}
