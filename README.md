@@ -28,7 +28,7 @@ This will retrieve the library.
 ## Usage
 
 The `Sniper` includes this methods:
-`Set`, `Get`, `Incr`, `Decr`, `Delete`, `Count`, `Walk` `WalkPll`, `Open`, `Close`, `FileSize`, `Backup`.
+`Set`, `Get`, `Incr`, `Decr`, `Delete`, `Count`, `Walk`, `WalkPll`, `Open`, `Close`, `FileSize`, `Backup`.
 
 ```go
 s, _ := sniper.Open("1")
