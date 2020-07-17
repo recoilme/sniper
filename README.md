@@ -28,7 +28,7 @@ This will retrieve the library.
 ## Usage
 
 The `Sniper` includes this methods:
-`Set`, `Get`, `Incr`, `Decr`, `Delete`, `Count`, `Open`, `Close`, `FileSize`, `Backup`.
+`Set`, `Get`, `Incr`, `Decr`, `Delete`, `Count`, `Walk`, `Open`, `Close`, `FileSize`, `Backup`.
 
 ```go
 s, _ := sniper.Open("1")
@@ -38,6 +38,24 @@ fmt.Println(res)
 s.Close()
 // Output:
 // go
+```
+
+```go
+s, _ := sniper.Open("1")
+s.Set([]byte("hello"), []byte("go"))
+s.Set([]byte("hello1"), []byte("go1"))
+s.Set([]byte("hello2"), []byte("go2"))
+
+walk := func(key []byte, val []byte) bool {
+	fmt.Printf("Key: %s ; Value: %s\n", string(key), string(val))
+	return false
+}
+
+err = s.Walk(walk)
+if err != nil {
+	fmt.Println(err)
+}
+s.Close()
 ```
 
 ## Performance

@@ -27,6 +27,9 @@ var ErrCollision = errors.New("Error, hash collision")
 var ErrFormat = errors.New("Error, unexpected file format")
 var ErrNotFound = errors.New("Error, key not found")
 
+var ErrAddrSize = errors.New("Error, unexpected address/size")
+var ErrReadValue = errors.New("Error, unexpected read error")
+
 //var ErrCollision = errors.New("Error, hash collision") // don't happen, on top layer of database
 var counters sync.Map
 var mutex = &sync.RWMutex{} //global mutex for counters and so on
@@ -52,6 +55,9 @@ type chunk struct {
 	h  map[uint32]byte     // holes: addr / size
 	iv interval.Interval
 }
+
+// Walk struct
+type WalkFn func(key []byte, val []byte) bool
 
 // Option is a function that takes a pointer to a Store and returns an error if it is invalid
 type Option func(*Store) error
@@ -117,7 +123,7 @@ func (c *chunk) init(name string, syncInterval time.Duration) (err error) {
 	c.m = make(map[uint32]addrSize)
 	c.h = make(map[uint32]byte)
 
-	if syncInterval>0 {
+	if syncInterval > 0 {
 		c.iv = interval.Set(func(t time.Time) {
 			err = c.f.Sync()
 			if err != nil {
@@ -200,7 +206,7 @@ func Open(opts ...Option) (s *Store, err error) {
 	// create chuncks
 	for i := range s.chunks[:] {
 
-		err = s.chunks[i].init(fmt.Sprintf("%s/%d", s.dir, i),s.syncInterval)
+		err = s.chunks[i].init(fmt.Sprintf("%s/%d", s.dir, i), s.syncInterval)
 		if err != nil {
 			return nil, err
 		}
@@ -381,6 +387,38 @@ func (c *chunk) count() int {
 	c.RLock()
 	defer c.RUnlock()
 	return len(c.m)
+}
+
+// Walk return key/values on the fly to external walk app function
+func (s *Store) Walk(fn WalkFn) (err error) {
+	for idx := range s.chunks[:] {
+		_, err = s.chunks[idx].walk(fn)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+// Internal sequential walk over all chunks
+func (c *chunk) walk(fn WalkFn) (bool, error) {
+	c.RLock()
+	defer c.RUnlock()
+	for h, _ := range c.m {
+		if addrsize, ok := c.m[h]; ok {
+			addr, size := addrSizeUnmarshal(addrsize)
+			packet := make([]byte, size)
+			_, err := c.f.ReadAt(packet, int64(addr))
+			if err != nil {
+				return true, ErrReadValue
+			}
+			key, val, _ := packetUnmarshal(packet)
+			fn(key, val)
+		} else {
+			return true, ErrAddrSize
+		}
+	}
+	return false, nil
 }
 
 // Close - close related chunks

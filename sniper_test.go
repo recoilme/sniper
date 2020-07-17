@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -100,6 +101,47 @@ func TestCmd(t *testing.T) {
 	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
 
 	assert.Equal(t, 1, s.Count())
+
+	err = s.Set([]byte("ahello"), []byte("aworld"))
+	assert.NoError(t, err)
+
+	err = s.Set([]byte("bhello"), []byte("bworld"))
+	assert.NoError(t, err)
+
+	err = s.Set([]byte("chello"), []byte("cworld"))
+	assert.NoError(t, err)
+
+	var kvb bool
+
+	kls := []string{"hello", "ahello", "bhello", "chello"}
+	vls := []string{"world", "aworld", "bworld", "cworld"}
+	var kfs []string
+	var vfs []string
+
+	walk := func(key []byte, val []byte) bool {
+		kfs = append(kfs, string(key))
+		vfs = append(vfs, string(val))
+		return false
+	}
+
+	err = s.Walk(walk)
+	if err != nil {
+		t.Errorf("Walk error: %v", err)
+	}
+
+	kvb = IsEqual(kls, kfs)
+	if !kvb { t.Errorf("Walk keys arrays not equal: %v, %v", kls, kfs) }
+	kvb = IsEqual(vls, vfs)
+	if !kvb { t.Errorf("Walk values arrays not equal: %v, %v", vls, vfs) }
+
+	_, err = s.Delete([]byte("ahello"))
+	assert.NoError(t, err)
+
+	_, err = s.Delete([]byte("bhello"))
+	assert.NoError(t, err)
+
+	_, err = s.Delete([]byte("chello"))
+	assert.NoError(t, err)
 
 	err = s.Close()
 	assert.NoError(t, err)
@@ -246,4 +288,19 @@ func sniperBench(keys [][]byte, N int) {
 	if err != nil {
 		panic("bad news")
 	}
+}
+
+func IsEqual(a1 []string, a2 []string) bool {
+	sort.Strings(a1)
+	sort.Strings(a2)
+	if len(a1) == len(a2) {
+		for i, v := range a1 {
+			if v != a2[i] {
+				return false
+			}
+		}
+	} else {
+		return false
+	}
+	return true
 }
