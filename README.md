@@ -58,7 +58,38 @@ if err != nil {
 }
 s.Close()
 ```
-Walk parallel with limit at 8 threads:
+Walk with stop logic:
+
+```go
+var mu sync.Mutex
+var stop bool
+
+s, _ := sniper.Open("1")
+s.Set([]byte("hello"), []byte("go"))
+s.Set([]byte("hello1"), []byte("go1"))
+s.Set([]byte("hello2"), []byte("go2"))
+
+walk := func(key []byte, val []byte) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	if stop {
+		return stop
+	}
+	if string(key) == "hello1" {
+		fmt.Printf("Key: %s ; Value: %s\n", string(key), string(val))
+		stop = true
+		return stop
+	}
+	return false
+}
+
+err = s.Walk(walk)
+if err != nil {
+	fmt.Println(err)
+}
+s.Close()
+```
+Walk parallel with limit at 8 threads and stop logic:
 
 ```go
 var mu sync.Mutex
