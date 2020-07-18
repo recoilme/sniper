@@ -403,7 +403,9 @@ func (s *Store) Walk(fn WalkFn) (err error) {
 }
 
 // Walk parallel return key/values on the fly to external walk app function
-func (s *Store) WalkPll(fn WalkFn, threads int) (err error) {
+func (s *Store) WalkPll(fn WalkFn, threads int) error {
+
+	var err error
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -443,12 +445,12 @@ Main:
 
 	}
 
-	err = qwg.Wait()
-	if err != nil {
-		return
+	qerr := qwg.Wait()
+	if qerr != nil {
+		return qerr
 	}
 
-	return
+	return err
 
 }
 
