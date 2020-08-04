@@ -18,6 +18,11 @@ type chunk struct {
 	needFsync bool
 }
 
+type addrSize struct {
+	addr uint32
+	size byte
+}
+
 func packetMarshal(k, v []byte) (sizeb byte, b []byte) {
 	// write head
 	sizeb, size := NextPowerOf2(uint32(len(v) + len(k) + sizeHead))
@@ -122,8 +127,8 @@ func (c *chunk) init(name string) (err error) {
 func (c *chunk) fsync() error {
 	if c.needFsync {
 		c.Lock()
+		defer c.Unlock()
 		c.needFsync = false
-		c.Unlock()
 		return c.f.Sync()
 	}
 	return nil
@@ -219,6 +224,7 @@ func (c *chunk) count() int {
 func (c *chunk) close() (err error) {
 	c.Lock()
 	defer c.Unlock()
+
 	return c.f.Close()
 }
 

@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/recoilme/sniper"
 	"github.com/tidwall/lotsa"
@@ -58,7 +59,7 @@ func sniperBench(keys [][]byte, N int) {
 
 	fmt.Println("-- sniper --")
 	sniper.DeleteStore("1")
-	s, err := sniper.Open(sniper.Dir("1"))
+	s, err := sniper.Open(sniper.Dir("1"), sniper.SyncInterval(1*time.Second))
 	if err != nil {
 		panic(err)
 	}

@@ -11,13 +11,11 @@ import (
 	"github.com/tidwall/interval"
 )
 
-//max chunk size 256Mb
 const chunksCnt = 256 //must be more then zero
-const chunkColCnt = 4 // chunks for collisions
-const fileMode = 0666
 const dirMode = 0777
+const fileMode = 0666
 const sizeHead = 8
-const deleted = 42 // flag for removed, tribute 2 dbf!
+const deleted = 42 // flag for removed, tribute 2 dbf
 
 //ErrCollision -  must not happen
 var ErrCollision = errors.New("Error, hash collision")
@@ -30,19 +28,15 @@ var ErrNotFound = errors.New("Error, key not found")
 
 var counters sync.Map
 var mutex = &sync.RWMutex{} //global mutex for counters and so on
+var chunkColCnt uint32      //chunks for collisions resolving
 
 // Store struct
-// data sharded by chunks
+// data in store sharded by chunks
 type Store struct {
 	chunks       [chunksCnt]chunk
 	dir          string
 	syncInterval time.Duration
 	iv           interval.Interval
-}
-
-type addrSize struct {
-	addr uint32
-	size byte
 }
 
 // OptStore is a store options
@@ -75,6 +69,17 @@ func Dir(dir string) OptStore {
 	}
 }
 
+// SetChunkColCnt number chunks for collisions resolving,
+// default is 4 (>1_000_000_000 of 8 bytes alphabet keys without collision errors)
+// for example this keys hash([]byte("mgdbywinfo")) & hash([]byte("uzmqkfjche")) has same hash
+// collision chunks needed for resolving this without collisions errors
+func SetChunkColCnt(chunks int) OptStore {
+	return func(s *Store) error {
+		chunkColCnt = uint32(chunks)
+		return nil
+	}
+}
+
 // SyncInterval - how often fsync do, default 0 - OS will do it
 func SyncInterval(interv time.Duration) OptStore {
 	return func(s *Store) error {
@@ -85,7 +90,7 @@ func SyncInterval(interv time.Duration) OptStore {
 					err := s.chunks[i].fsync()
 					if err != nil {
 						fmt.Printf("Error fsync:%s\n", err)
-						//critical error, ssd/hdd drive is broken
+						//its critical error drive is broken
 						panic(err)
 					}
 				}
@@ -96,9 +101,10 @@ func SyncInterval(interv time.Duration) OptStore {
 }
 
 func hash(b []byte) uint32 {
+	// TODO race, test and replace with https://github.com/spaolacci/murmur3/pull/28
 	return murmur3.Sum32WithSeed(b, 0)
 	/*
-		convert to 24 bit hash
+		convert to 24 bit hash if you need more memory, but add chunks for collisions
 		//MASK_24 := uint32((1 << 24) - 1)
 		//ss := h.Sum32()
 		//hash := (ss >> 24) ^ (ss & MASK_24)
@@ -113,8 +119,9 @@ func hash(b []byte) uint32 {
 // usage - Open(Dir("1"), SyncInterval(1*time.Second))
 func Open(opts ...OptStore) (s *Store, err error) {
 	s = &Store{}
-
+	//default
 	s.syncInterval = 0
+	chunkColCnt = 4
 	// call option functions on instance to set options on it
 	for _, opt := range opts {
 		err := opt(s)
@@ -157,7 +164,7 @@ func (s *Store) Set(k, v []byte) (err error) {
 	idx := idx(h)
 	err = s.chunks[idx].set(k, v, h)
 	if err == ErrCollision {
-		for i := 0; i < chunkColCnt; i++ {
+		for i := 0; i < int(chunkColCnt); i++ {
 			err = s.chunks[i].set(k, v, h)
 			if err == ErrCollision {
 				continue
@@ -174,7 +181,7 @@ func (s *Store) Get(k []byte) (v []byte, err error) {
 	idx := idx(h)
 	v, err = s.chunks[idx].get(k, h)
 	if err == ErrCollision {
-		for i := 0; i < chunkColCnt; i++ {
+		for i := 0; i < int(chunkColCnt); i++ {
 			v, err = s.chunks[i].get(k, h)
 			if err == ErrCollision || err == ErrNotFound {
 				continue
@@ -270,7 +277,7 @@ func (s *Store) Delete(k []byte) (isDeleted bool, err error) {
 	idx := idx(h)
 	isDeleted, err = s.chunks[idx].delete(k, h)
 	if err == ErrCollision {
-		for i := 0; i < chunkColCnt; i++ {
+		for i := 0; i < int(chunkColCnt); i++ {
 			isDeleted, err = s.chunks[i].delete(k, h)
 			if err == ErrCollision || err == ErrNotFound {
 				continue

@@ -8,7 +8,6 @@ import (
 	"os"
 	"runtime"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/lotsa"
@@ -191,7 +190,7 @@ func sniperBench(keys [][]byte, N int) {
 
 	fmt.Println("-- sniper --")
 	DeleteStore("1")
-	s, err := Open(Dir("1"), SyncInterval(1*time.Second))
+	s, err := Open(Dir("1")) //, SyncInterval(1*time.Second))
 	if err != nil {
 		panic(err)
 	}
@@ -249,5 +248,5 @@ func sniperBench(keys [][]byte, N int) {
 }
 
 func TestSync(t *testing.T) {
-	sniperBench(seed(1_000_000))
+	sniperBench(seed(100_000))
 }
