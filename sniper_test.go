@@ -144,7 +144,7 @@ func TestCmd(t *testing.T) {
 
 	err = DeleteStore("1")
 	assert.NoError(t, err)
-	sniperBench(seed())
+	sniperBench(seed(100_000))
 }
 
 func randKey(rnd *rand.Rand, n int) []byte {
@@ -156,11 +156,11 @@ func randKey(rnd *rand.Rand, n int) []byte {
 	return s
 }
 
-func seed() ([][]byte, int) {
+func seed(N int) ([][]byte, int) {
 	seed := int64(1570109110136449000) //time.Now().UnixNano() //1570108152262917000
 	// println(seed)
 	rng := rand.New(rand.NewSource(seed))
-	N := 100_000
+
 	K := 10
 
 	fmt.Printf("\n")
@@ -190,8 +190,7 @@ func sniperBench(keys [][]byte, N int) {
 
 	fmt.Println("-- sniper --")
 	DeleteStore("1")
-	//s, err := Open(Dir("1"),SyncInterval(1*time.Second)) Игорь, попробуй вот так
-	s, err := Open(Dir("1"))
+	s, err := Open(Dir("1")) //, SyncInterval(1*time.Second))
 	if err != nil {
 		panic(err)
 	}
@@ -246,4 +245,8 @@ func sniperBench(keys [][]byte, N int) {
 	if err != nil {
 		panic("bad news")
 	}
+}
+
+func TestSync(t *testing.T) {
+	sniperBench(seed(100_000))
 }
