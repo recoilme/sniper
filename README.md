@@ -31,7 +31,7 @@ The `Sniper` includes this methods:
 `Set`, `Get`, `Incr`, `Decr`, `Delete`, `Count`, `Open`, `Close`, `FileSize`, `Backup`.
 
 ```go
-s, _ := sniper.Open("1")
+s, _ := sniper.Open(sniper.Dir("1"))
 s.Set([]byte("hello"), []byte("go"))
 res, _ = s.Get([]byte("hello"))
 fmt.Println(res)
@@ -57,7 +57,7 @@ set: 10,000,000 ops over 8 threads in 63159ms, 158,331/sec, 6315 ns/op, 644.3 MB
 get: 10,000,000 ops over 8 threads in 4455ms, 2,244,629/sec, 445 ns/op, 305.5 MB, 32 bytes/op
 del: 10,000,000 ops over 8 threads in 37568ms, 266,182/sec, 3756 ns/op, 122.8 MB, 12 bytes/op
 
-With sync(1 Second)
+With fsync
 
 set: 10,000,000 ops over 8 threads in 85088ms, 117,524/sec, 8508 ns/op, 644.4 MB, 67 bytes/op
 get: 10,000,000 ops over 8 threads in 5623ms, 1,778,268/sec, 562 ns/op, 305.5 MB, 32 bytes/op

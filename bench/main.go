@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"os"
 	"runtime"
-	"time"
 
 	"github.com/recoilme/sniper"
 	"github.com/tidwall/lotsa"
@@ -59,20 +58,18 @@ func sniperBench(keys [][]byte, N int) {
 
 	fmt.Println("-- sniper --")
 	sniper.DeleteStore("1")
-	s, err := sniper.Open(sniper.Dir("1"), sniper.SyncInterval(1*time.Second))
+	s, err := sniper.Open(sniper.Dir("1"), sniper.ChunksCollision(2), sniper.ChunksTotal(10))
 	if err != nil {
 		panic(err)
 	}
-	fmt.Print("set: ")
+	fmt.Println("set: ")
 	coll := 0
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		b := make([]byte, 8)
 		binary.BigEndian.PutUint64(b, uint64(i))
-		//println("set", i, keys[i], b)
 		err := s.Set(keys[i], b)
 		if err == sniper.ErrCollision {
-			coll++
-			err = nil
+			fmt.Println("ErrCollision, set:", string(keys[i]), err.Error())
 		}
 		if err != nil {
 			panic(err)
@@ -81,7 +78,7 @@ func sniperBench(keys [][]byte, N int) {
 
 	fmt.Printf("Alloc = %v MiB Total = %v MiB Coll=%d\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024), coll)
 	coll = 0
-	fmt.Print("get: ")
+	fmt.Println("get: ")
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		b, err := s.Get(keys[i])
 		if err != nil {
@@ -96,12 +93,10 @@ func sniperBench(keys [][]byte, N int) {
 		}
 	})
 
-	var ms2 runtime.MemStats
-	runtime.ReadMemStats(&ms2)
+	runtime.ReadMemStats(&ms)
+	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms.Alloc / 1024 / 1024), (ms.TotalAlloc / 1024 / 1024))
 
-	fmt.Printf("Alloc = %v MiB Total = %v MiB\n", (ms2.Alloc / 1024 / 1024), (ms2.TotalAlloc / 1024 / 1024))
-
-	fmt.Print("del: ")
+	fmt.Println("del: ")
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		s.Delete(keys[i])
 	})
