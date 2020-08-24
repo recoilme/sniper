@@ -61,6 +61,11 @@ With fsync
 
 set: 10,000,000 ops over 8 threads in 85088ms, 117,524/sec, 8508 ns/op, 644.4 MB, 67 bytes/op
 get: 10,000,000 ops over 8 threads in 5623ms, 1,778,268/sec, 562 ns/op, 305.5 MB, 32 bytes/op
+
+With tree
+set: 10,000,000 ops over 8 threads in 35663ms, 280,399/sec, 3566 ns/op, 964.1 MB, 101 bytes/op
+set: 10,000,000 ops over 8 threads in 55610ms, 179,824/sec, 5560 ns/op, 1.4 GB, 150 bytes/op
+set: 10,000,000 ops over 8 threads in 36697ms, 272,503/sec, 3669 ns/op, 922.0 MB, 96 bytes/op
 ```
 
 ## How it is done

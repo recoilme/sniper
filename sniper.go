@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/recoilme/tinybtree"
+	"github.com/recoilme/sortedset"
 	"github.com/spaolacci/murmur3"
 	"github.com/tidwall/interval"
 )
@@ -40,7 +40,8 @@ type Store struct {
 	dir          string
 	syncInterval time.Duration
 	iv           interval.Interval
-	tree         *tinybtree.BTree
+	ss           *sortedset.SortedSet
+	//tree         *btreeset.BTreeSet
 }
 
 // OptStore is a store options
@@ -158,7 +159,7 @@ func Open(opts ...OptStore) (s *Store, err error) {
 			return nil, err
 		}
 	}
-	s.tree = &tinybtree.BTree{}
+	s.ss = sortedset.New()
 	return
 }
 
@@ -182,9 +183,6 @@ func (s *Store) idx(h uint32) uint32 {
 func (s *Store) Set(k, v []byte) (err error) {
 	h := hash(k)
 	idx := s.idx(h)
-	s.Lock()
-	s.tree.Set(string(k))
-	s.Unlock()
 	err = s.chunks[idx].set(k, v, h)
 	if err == ErrCollision {
 		for i := 0; i < int(s.chunkColCnt); i++ {
@@ -194,6 +192,16 @@ func (s *Store) Set(k, v []byte) (err error) {
 			}
 			break
 		}
+	}
+	return
+}
+
+// Put - store key and val with set
+// And add key in index (backed by sortedset)
+func (s *Store) Put(k, v []byte) (err error) {
+	err = s.Set(k, v)
+	if err == nil {
+		s.ss.Put(string(k))
 	}
 	return
 }
@@ -352,4 +360,14 @@ func appendUint32(b []byte, x uint32) []byte {
 		byte(x),
 	}
 	return append(b, a[:]...)
+}
+
+// Keys will return keys stored with Put method
+// Params: key prefix ("" - return all keys)
+// Limit - 0, all
+// Offset - 0, zero offset
+// Keys will be without prefix and in descending order
+func (s *Store) Keys(prefix string, limit, offset int) []string {
+	bucket := sortedset.Bucket(s.ss, prefix)
+	return bucket.Keys(limit, offset)
 }
