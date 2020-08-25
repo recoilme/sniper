@@ -4,6 +4,8 @@ github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZb
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/recoilme/sortedset v0.0.0-20200824122542-a0d1b745fbdd h1:BBOAfodNU0fFpQcD3/JjjMW0jEbzH+7A43ZeG1PPjSU=
 github.com/recoilme/sortedset v0.0.0-20200824122542-a0d1b745fbdd/go.mod h1:YB55h6bCtRPPhCT4AWwAwKtKBk7xP4b9cZgUMnsgpMo=
+github.com/recoilme/sortedset v0.0.0-20200825100557-fdc6fff0bc87 h1:WKeK1vEaQllmIkb9ik8aZ7VP5k/xDf0O/bnnt9uwuYc=
+github.com/recoilme/sortedset v0.0.0-20200825100557-fdc6fff0bc87/go.mod h1:YB55h6bCtRPPhCT4AWwAwKtKBk7xP4b9cZgUMnsgpMo=
 github.com/spaolacci/murmur3 v1.1.0 h1:7c1g84S4BPRrfL5Xrdp6fOJ206sU9y293DDHaoy0bLI=
 github.com/spaolacci/murmur3 v1.1.0/go.mod h1:JwIasOWyU6f++ZhiEuf87xNszmSA2myDM2Kzu9HwQUA=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=

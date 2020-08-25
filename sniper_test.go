@@ -271,3 +271,31 @@ func TestSingleFile(t *testing.T) {
 	assert.NoError(t, err)
 	DeleteStore("2")
 }
+
+func TestBucket(t *testing.T) {
+	DeleteStore("2")
+	s, err := Open(Dir("2"), ChunksCollision(0), ChunksTotal(1))
+	assert.NoError(t, err)
+	users, err := s.Bucket("users")
+	assert.NoError(t, err)
+
+	err = s.Put(users, []byte("01"), []byte("rob"))
+	assert.NoError(t, err)
+
+	err = s.Put(users, []byte("02"), []byte("bob"))
+	assert.NoError(t, err)
+
+	v, err := s.Get([]byte("users01"))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("rob"), v)
+
+	v, err = s.Get([]byte("users02"))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("bob"), v)
+
+	assert.Equal(t, []string{"02", "01"}, users.Keys(0, 0))
+
+	err = s.Close()
+	assert.NoError(t, err)
+	DeleteStore("2")
+}

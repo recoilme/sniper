@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -196,16 +197,6 @@ func (s *Store) Set(k, v []byte) (err error) {
 	return
 }
 
-// Put - store key and val with set
-// And add key in index (backed by sortedset)
-func (s *Store) Put(k, v []byte) (err error) {
-	err = s.Set(k, v)
-	if err == nil {
-		s.ss.Put(string(k))
-	}
-	return
-}
-
 // Get - return val by key
 func (s *Store) Get(k []byte) (v []byte, err error) {
 	h := hash(k)
@@ -362,12 +353,55 @@ func appendUint32(b []byte, x uint32) []byte {
 	return append(b, a[:]...)
 }
 
+// Bucket - create new bucket for storing keys with same prefix in memory index
+func (s *Store) Bucket(name string) (*sortedset.BucketStore, error) {
+	// store all buckets in [buckets] key
+	bKey := []byte("[buckets]")
+	val, err := s.Get(bKey)
+	if err == ErrNotFound {
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	buckets := string(val)
+	var isExists bool
+	for _, bucket := range strings.Split(buckets, ",") {
+		if bucket == name {
+			isExists = true
+			break
+		}
+	}
+	if !isExists {
+		if buckets != "" {
+			buckets += ","
+		}
+		buckets += name
+		err = s.Set(bKey, []byte(buckets))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return sortedset.Bucket(s.ss, name), nil
+}
+
+// Put - store key and val with Set
+// And add key in index (backed by sortedset)
+func (s *Store) Put(bucket *sortedset.BucketStore, k, v []byte) (err error) {
+	key := []byte(bucket.Name)
+	key = append(key, k...)
+	err = s.Set(key, v)
+	if err == nil {
+		bucket.Put(string(k))
+	}
+	return
+}
+
 // Keys will return keys stored with Put method
 // Params: key prefix ("" - return all keys)
 // Limit - 0, all
 // Offset - 0, zero offset
 // Keys will be without prefix and in descending order
-func (s *Store) Keys(prefix string, limit, offset int) []string {
-	bucket := sortedset.Bucket(s.ss, prefix)
+func (s *Store) Keys(bucket *sortedset.BucketStore, limit, offset int) []string {
 	return bucket.Keys(limit, offset)
 }
