@@ -4,14 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/recoilme/sortedset"
 	"github.com/spaolacci/murmur3"
 	"github.com/tidwall/interval"
 )
 
-const chunksCnt = 256 //must be more then zero
 const dirMode = 0777
 const fileMode = 0666
 const sizeHead = 8
@@ -28,15 +29,20 @@ var ErrNotFound = errors.New("Error, key not found")
 
 var counters sync.Map
 var mutex = &sync.RWMutex{} //global mutex for counters and so on
-var chunkColCnt uint32      //chunks for collisions resolving
+//var chunkColCnt uint32      //chunks for collisions resolving
 
 // Store struct
 // data in store sharded by chunks
 type Store struct {
-	chunks       [chunksCnt]chunk
+	sync.RWMutex
+	chunksCnt    int
+	chunks       []chunk
+	chunkColCnt  int
 	dir          string
 	syncInterval time.Duration
 	iv           interval.Interval
+	ss           *sortedset.SortedSet
+	//tree         *btreeset.BTreeSet
 }
 
 // OptStore is a store options
@@ -69,13 +75,23 @@ func Dir(dir string) OptStore {
 	}
 }
 
-// SetChunkColCnt number chunks for collisions resolving,
+// ChunksCollision number chunks for collisions resolving,
 // default is 4 (>1_000_000_000 of 8 bytes alphabet keys without collision errors)
-// for example this keys hash([]byte("mgdbywinfo")) & hash([]byte("uzmqkfjche")) has same hash
-// collision chunks needed for resolving this without collisions errors
-func SetChunkColCnt(chunks int) OptStore {
+// different keys may has same hash
+// collision chunks needed for resolving this, without collisions errors
+// if ChunkColCnt - zero, ErrCollision will return in case of collision
+func ChunksCollision(chunks int) OptStore {
 	return func(s *Store) error {
-		chunkColCnt = uint32(chunks)
+		s.chunkColCnt = chunks
+		return nil
+	}
+}
+
+//ChunksTotal - total chunks/shards, default 256
+//Must be more then collision chunks
+func ChunksTotal(chunks int) OptStore {
+	return func(s *Store) error {
+		s.chunksCnt = chunks
 		return nil
 	}
 }
@@ -121,7 +137,8 @@ func Open(opts ...OptStore) (s *Store, err error) {
 	s = &Store{}
 	//default
 	s.syncInterval = 0
-	chunkColCnt = 4
+	s.chunkColCnt = 4
+	s.chunksCnt = 256
 	// call option functions on instance to set options on it
 	for _, opt := range opts {
 		err := opt(s)
@@ -130,6 +147,10 @@ func Open(opts ...OptStore) (s *Store, err error) {
 			return nil, err
 		}
 	}
+	if s.chunksCnt-s.chunkColCnt < 1 {
+		return nil, errors.New("chunksCnt must be more then chunkColCnt minimum on 1")
+	}
+	s.chunks = make([]chunk, s.chunksCnt)
 
 	// create chuncks
 	for i := range s.chunks[:] {
@@ -139,6 +160,7 @@ func Open(opts ...OptStore) (s *Store, err error) {
 			return nil, err
 		}
 	}
+	s.ss = sortedset.New()
 	return
 }
 
@@ -152,8 +174,8 @@ func addrSizeUnmarshal(as addrSize) (addr, size uint32) {
 	return as.addr, 1 << as.size
 }
 
-func idx(h uint32) uint32 {
-	return (h % (chunksCnt - chunkColCnt)) + chunkColCnt
+func (s *Store) idx(h uint32) uint32 {
+	return uint32((int(h) % (s.chunksCnt - s.chunkColCnt)) + s.chunkColCnt)
 }
 
 // Set - store key and val in shard
@@ -161,10 +183,10 @@ func idx(h uint32) uint32 {
 // packet size = len(key) + len(val) + 8
 func (s *Store) Set(k, v []byte) (err error) {
 	h := hash(k)
-	idx := idx(h)
+	idx := s.idx(h)
 	err = s.chunks[idx].set(k, v, h)
 	if err == ErrCollision {
-		for i := 0; i < int(chunkColCnt); i++ {
+		for i := 0; i < int(s.chunkColCnt); i++ {
 			err = s.chunks[i].set(k, v, h)
 			if err == ErrCollision {
 				continue
@@ -178,10 +200,10 @@ func (s *Store) Set(k, v []byte) (err error) {
 // Get - return val by key
 func (s *Store) Get(k []byte) (v []byte, err error) {
 	h := hash(k)
-	idx := idx(h)
+	idx := s.idx(h)
 	v, err = s.chunks[idx].get(k, h)
 	if err == ErrCollision {
-		for i := 0; i < int(chunkColCnt); i++ {
+		for i := 0; i < int(s.chunkColCnt); i++ {
 			v, err = s.chunks[i].get(k, h)
 			if err == ErrCollision || err == ErrNotFound {
 				continue
@@ -274,10 +296,10 @@ func NextPowerOf2(v uint32) (power byte, val uint32) {
 // Delete - delete item by key
 func (s *Store) Delete(k []byte) (isDeleted bool, err error) {
 	h := hash(k)
-	idx := idx(h)
+	idx := s.idx(h)
 	isDeleted, err = s.chunks[idx].delete(k, h)
 	if err == ErrCollision {
-		for i := 0; i < int(chunkColCnt); i++ {
+		for i := 0; i < int(s.chunkColCnt); i++ {
 			isDeleted, err = s.chunks[i].delete(k, h)
 			if err == ErrCollision || err == ErrNotFound {
 				continue
@@ -292,7 +314,7 @@ func (s *Store) Delete(k []byte) (isDeleted bool, err error) {
 // inited with zero
 func (s *Store) Incr(k []byte, v uint64) (uint64, error) {
 	h := hash(k)
-	idx := idx(h)
+	idx := s.idx(h)
 	return s.chunks[idx].incrdecr(k, h, v, true)
 }
 
@@ -300,7 +322,7 @@ func (s *Store) Incr(k []byte, v uint64) (uint64, error) {
 // inited with zero
 func (s *Store) Decr(k []byte, v uint64) (uint64, error) {
 	h := hash(k)
-	idx := idx(h)
+	idx := s.idx(h)
 	return s.chunks[idx].incrdecr(k, h, v, false)
 }
 
@@ -329,4 +351,57 @@ func appendUint32(b []byte, x uint32) []byte {
 		byte(x),
 	}
 	return append(b, a[:]...)
+}
+
+// Bucket - create new bucket for storing keys with same prefix in memory index
+func (s *Store) Bucket(name string) (*sortedset.BucketStore, error) {
+	// store all buckets in [buckets] key
+	bKey := []byte("[buckets]")
+	val, err := s.Get(bKey)
+	if err == ErrNotFound {
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	buckets := string(val)
+	var isExists bool
+	for _, bucket := range strings.Split(buckets, ",") {
+		if bucket == name {
+			isExists = true
+			break
+		}
+	}
+	if !isExists {
+		if buckets != "" {
+			buckets += ","
+		}
+		buckets += name
+		err = s.Set(bKey, []byte(buckets))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return sortedset.Bucket(s.ss, name), nil
+}
+
+// Put - store key and val with Set
+// And add key in index (backed by sortedset)
+func (s *Store) Put(bucket *sortedset.BucketStore, k, v []byte) (err error) {
+	key := []byte(bucket.Name)
+	key = append(key, k...)
+	err = s.Set(key, v)
+	if err == nil {
+		bucket.Put(string(k))
+	}
+	return
+}
+
+// Keys will return keys stored with Put method
+// Params: key prefix ("" - return all keys)
+// Limit - 0, all
+// Offset - 0, zero offset
+// Keys will be without prefix and in descending order
+func (s *Store) Keys(bucket *sortedset.BucketStore, limit, offset int) []string {
+	return bucket.Keys(limit, offset)
 }

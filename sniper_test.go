@@ -36,11 +36,11 @@ func TestHashCol(t *testing.T) {
 	binary.BigEndian.PutUint64(k2, uint64(16_123_243))
 	k3 := make([]byte, 8)
 	binary.BigEndian.PutUint64(k3, uint64(106_987_520))
-	//println(hash(k2), hash(k3))
+	println(hash(k2), hash(k3))
 	//mgdbywinfo uzmqkfjche 720448991
-	//println("str", hash([]byte("mgdbywinfo")), hash([]byte("uzmqkfjche")))
+	println("str", hash([]byte("mgdbywinfo")), hash([]byte("uzmqkfjche")))
 	//		 4_294_967_296
-	sizet := 1_000_000
+	sizet := 100_000_000
 	m := make(map[uint32]int, sizet)
 	for i := 0; i < sizet; i++ {
 		k1 := make([]byte, 8)
@@ -249,4 +249,53 @@ func sniperBench(keys [][]byte, N int) {
 
 func TestSync(t *testing.T) {
 	sniperBench(seed(100_000))
+}
+
+func TestSingleFile(t *testing.T) {
+	DeleteStore("2")
+	s, err := Open(Dir("2"), ChunksCollision(0), ChunksTotal(1))
+	assert.NoError(t, err)
+	err = s.Set([]byte("mgdbywinfo"), []byte("1"))
+	assert.NoError(t, err)
+	err = s.Set([]byte("uzmqkfjche"), []byte("2"))
+	assert.NoError(t, err)
+
+	v, err := s.Get([]byte("uzmqkfjche"))
+	assert.NoError(t, err)
+	assert.EqualValues(t, []byte("2"), v)
+	v, err = s.Get([]byte("mgdbywinfo"))
+	assert.NoError(t, err)
+	assert.EqualValues(t, []byte("1"), v)
+
+	err = s.Close()
+	assert.NoError(t, err)
+	DeleteStore("2")
+}
+
+func TestBucket(t *testing.T) {
+	DeleteStore("2")
+	s, err := Open(Dir("2"), ChunksCollision(0), ChunksTotal(1))
+	assert.NoError(t, err)
+	users, err := s.Bucket("users")
+	assert.NoError(t, err)
+
+	err = s.Put(users, []byte("01"), []byte("rob"))
+	assert.NoError(t, err)
+
+	err = s.Put(users, []byte("02"), []byte("bob"))
+	assert.NoError(t, err)
+
+	v, err := s.Get([]byte("users01"))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("rob"), v)
+
+	v, err = s.Get([]byte("users02"))
+	assert.NoError(t, err)
+	assert.Equal(t, []byte("bob"), v)
+
+	assert.Equal(t, []string{"02", "01"}, users.Keys(0, 0))
+
+	err = s.Close()
+	assert.NoError(t, err)
+	DeleteStore("2")
 }
