@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -90,18 +91,21 @@ func (c *chunk) init(name string) (err error) {
 			lenk := binary.BigEndian.Uint16(b[2:4])
 			lenv := binary.BigEndian.Uint32(b[4:8])
 			if lenk == 0 {
-				return ErrFormat
+				return fmt.Errorf("len(key) == 0: %w", ErrFormat)
 			}
 			// skip val
 			_, seekerr := c.f.Seek(int64(lenv), 1)
 			if seekerr != nil {
-				return ErrFormat
+				return fmt.Errorf("%s: %w", seekerr.Error(), ErrFormat)
 			}
 			// read key
 			key := make([]byte, lenk)
 			n, errRead = c.f.Read(key)
 			if errRead != nil || n != int(lenk) {
-				return ErrFormat
+				if errRead != nil {
+					return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+				}
+				return fmt.Errorf("n != int(lenk): %w", ErrFormat)
 			}
 			shiftv := 1 << byte(b[0])                                               //2^pow
 			ret, seekerr := c.f.Seek(int64(shiftv-int(lenk)-int(lenv)-sizeHead), 1) // skip val && key
