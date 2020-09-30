@@ -90,9 +90,6 @@ func (c *chunk) init(name string) (err error) {
 			//readed header
 			lenk := binary.BigEndian.Uint16(b[2:4])
 			lenv := binary.BigEndian.Uint32(b[4:8])
-			if lenk == 0 {
-				return fmt.Errorf("len(key) == 0: %w", ErrFormat)
-			}
 			// skip val
 			_, seekerr := c.f.Seek(int64(lenv), 1)
 			if seekerr != nil {

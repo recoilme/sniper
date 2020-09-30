@@ -299,3 +299,30 @@ func TestBucket(t *testing.T) {
 	assert.NoError(t, err)
 	DeleteStore("2")
 }
+
+func TestEmptyKey(t *testing.T) {
+	err := DeleteStore("1")
+	assert.NoError(t, err)
+
+	s, err := Open(Dir("1"))
+	assert.NoError(t, err)
+
+	err = s.Set([]byte(""), []byte("go"))
+	assert.NoError(t, err)
+
+	err = s.Set([]byte(""), []byte("world"))
+	assert.NoError(t, err)
+
+	res, err := s.Get([]byte(""))
+	assert.NoError(t, err)
+
+	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
+
+	assert.Equal(t, 1, s.Count())
+
+	err = s.Close()
+	assert.NoError(t, err)
+
+	err = DeleteStore("1")
+	assert.NoError(t, err)
+}
