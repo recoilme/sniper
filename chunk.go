@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 )
 
 // chunk - local shard
@@ -24,35 +25,94 @@ type addrSize struct {
 	size byte
 }
 
-func packetMarshal(k, v []byte) (sizeb byte, b []byte) {
-	// write head
-	sizeb, size := NextPowerOf2(uint32(len(v) + len(k) + sizeHead))
-	b = make([]byte, size)
-	b[0] = sizeb
-	b[1] = byte(0)
-	//len key in bigendian format
-	lenk := uint16(len(k))
-	b[2] = byte(lenk >> 8)
-	b[3] = byte(lenk)
-	//len val in bigendian format
-	lenv := uint32(len(v))
-	b[4] = byte(lenv >> 24)
-	b[5] = byte(lenv >> 16)
-	b[6] = byte(lenv >> 8)
-	b[7] = byte(lenv)
-	// write body: val and key
-	copy(b[sizeHead:], v)
-	copy(b[sizeHead+lenv:], k)
+type Header struct {
+	sizeb  uint8
+	status uint8
+	keylen uint16
+	vallen uint32
+	expire uint32
+}
+
+// https://github.com/thejerf/gomempool/blob/master/pool.go#L519
+// http://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
+// suitably modified to work on 32-bit
+func nextPowerOf2(v uint32) uint32 {
+	v--
+	v |= v >> 1
+	v |= v >> 2
+	v |= v >> 4
+	v |= v >> 8
+	v |= v >> 16
+	v++
+
+	return v
+}
+
+// NextPowerOf2 return next power of 2 for v and it's value
+// return maxuint32 in case of overflow
+func NextPowerOf2(v uint32) (power byte, val uint32) {
+	if v == 0 {
+		return 0, 0
+	}
+	for power = 0; power < 32; power++ {
+		val = 1 << power
+		if val >= v {
+			break
+		}
+	}
+	if power == 32 {
+		//overflow
+		val = 4294967295
+	}
 	return
 }
 
-func packetUnmarshal(packet []byte) (k, v []byte, sizeb byte) {
-	_ = packet[7]
-	sizeb = packet[0]
-	lenk := binary.BigEndian.Uint16(packet[2:4])
-	lenv := binary.BigEndian.Uint32(packet[4:8])
-	k = packet[sizeHead+lenv : sizeHead+lenv+uint32(lenk)]
-	v = packet[sizeHead : sizeHead+lenv]
+func makeHeader(k, v []byte, expire uint32) (header *Header) {
+	header = &Header{}
+	header.status = 0
+	header.keylen = uint16(len(k))
+	header.vallen = uint32(len(v))
+	header.expire = expire
+	sizeb, _ := NextPowerOf2(uint32(header.keylen) + header.vallen + sizeHead)
+	header.sizeb = sizeb
+	return
+}
+
+func parseHeader(b []byte) (header *Header) {
+	header = &Header{}
+	header.sizeb = b[0]
+	header.status = b[1]
+	header.keylen = binary.BigEndian.Uint16(b[2:4])
+	header.vallen = binary.BigEndian.Uint32(b[4:8])
+	header.expire = binary.BigEndian.Uint32(b[8:12])
+	return
+}
+
+func writeHeader(b []byte, header *Header) {
+	b[0] = header.sizeb
+	b[1] = header.status
+	binary.BigEndian.PutUint16(b[2:4], header.keylen)
+	binary.BigEndian.PutUint32(b[4:8], header.vallen)
+	binary.BigEndian.PutUint32(b[8:12], header.expire)
+	return
+}
+
+func packetMarshal(k, v []byte, expire uint32) (header *Header, b []byte) {
+	// write head
+	header = makeHeader(k, v, expire)
+	size := 1 << header.sizeb
+	b = make([]byte, size)
+	writeHeader(b, header)
+	// write body: val and key
+	copy(b[sizeHead:], v)
+	copy(b[sizeHead+header.vallen:], k)
+	return
+}
+
+func packetUnmarshal(packet []byte) (header *Header, k, v []byte) {
+	header = parseHeader(packet)
+	k = packet[sizeHead+header.vallen : sizeHead+header.vallen+uint32(header.keylen)]
+	v = packet[sizeHead : sizeHead+header.vallen]
 	return
 }
 
@@ -79,43 +139,42 @@ func (c *chunk) init(name string) (err error) {
 		//read file
 		var seek int
 		for {
-			b := make([]byte, 8)
+			b := make([]byte, sizeHead)
 			n, errRead := c.f.Read(b)
-			if errRead != nil || n != 8 {
+			if errRead != nil || n != sizeHead {
 				if errRead != nil && errRead.Error() != "EOF" {
 					err = errRead
 				}
 				break
 			}
 			//readed header
-			lenk := binary.BigEndian.Uint16(b[2:4])
-			lenv := binary.BigEndian.Uint32(b[4:8])
+			header := parseHeader(b)
 			// skip val
-			_, seekerr := c.f.Seek(int64(lenv), 1)
+			_, seekerr := c.f.Seek(int64(header.vallen), 1)
 			if seekerr != nil {
 				return fmt.Errorf("%s: %w", seekerr.Error(), ErrFormat)
 			}
 			// read key
-			key := make([]byte, lenk)
+			key := make([]byte, header.keylen)
 			n, errRead = c.f.Read(key)
-			if errRead != nil || n != int(lenk) {
-				if errRead != nil {
-					return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
-				}
-				return fmt.Errorf("n != int(lenk): %w", ErrFormat)
+			if errRead != nil {
+				return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
 			}
-			shiftv := 1 << byte(b[0])                                               //2^pow
-			ret, seekerr := c.f.Seek(int64(shiftv-int(lenk)-int(lenv)-sizeHead), 1) // skip val && key
+			if n != int(header.keylen) {
+				return fmt.Errorf("n != key length: %w", ErrFormat)
+			}
+			shiftv := 1 << header.sizeb                                                               //2^pow
+			ret, seekerr := c.f.Seek(int64(shiftv-int(header.keylen)-int(header.vallen)-sizeHead), 1) // skip empty tail
 			if seekerr != nil {
 				return ErrFormat
 			}
 			// map store
-			if b[1] != deleted {
+			if header.status != deleted && (header.expire == 0 || int64(header.expire) >= time.Now().Unix()) {
 				h := hash(key)
-				c.m[h] = addrSizeMarshal(uint32(seek), b[0])
+				c.m[h] = addrSizeMarshal(uint32(seek), header.sizeb)
 			} else {
 				//deleted blocks store
-				c.h[uint32(seek)] = b[0] // seek / size
+				c.h[uint32(seek)] = header.sizeb // seek / size
 			}
 			seek = int(ret)
 		}
@@ -135,12 +194,38 @@ func (c *chunk) fsync() error {
 	return nil
 }
 
+//expirekeys walk all keys and delete expired
+func (c *chunk) expirekeys() error {
+	c.Lock()
+	defer c.Unlock()
+
+	for h, addrsize := range c.m {
+		addr, _ := addrSizeUnmarshal(addrsize)
+		headerbuf := make([]byte, sizeHead)
+		_, err := c.f.ReadAt(headerbuf, int64(addr))
+		if err != nil {
+			return err
+		}
+		header := parseHeader(headerbuf)
+		if header.expire != 0 && int64(header.expire) < time.Now().Unix() {
+			delb := []byte{deleted}
+			_, err = c.f.WriteAt(delb, int64(addr+1))
+			if err != nil {
+				return err
+			}
+			delete(c.m, h)
+			c.h[addr] = header.sizeb
+		}
+	}
+	return nil
+}
+
 // set - write data to file & in map
-func (c *chunk) set(k, v []byte, h uint32) (err error) {
+func (c *chunk) set(k, v []byte, h uint32, expire uint32) (err error) {
 	c.Lock()
 	defer c.Unlock()
 	c.needFsync = true
-	sizeb, b := packetMarshal(k, v)
+	header, b := packetMarshal(k, v, expire)
 	// write at file
 	pos := int64(-1)
 
@@ -151,28 +236,27 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 		if err != nil {
 			return err
 		}
-		key, _, sizeold := packetUnmarshal(packet)
+		headerold, key, _ := packetUnmarshal(packet)
 		if !bytes.Equal(key, k) {
 			//println(string(key), string(k))
 			return ErrCollision
 		}
 
-		if err == nil && sizeold == sizeb {
+		if err == nil && headerold.sizeb == header.sizeb {
 			//overwrite
 			pos = int64(addr)
 		} else {
 			// mark old k/v as deleted
-			delb := make([]byte, 1)
-			delb[0] = deleted
+			delb := []byte{deleted}
 			_, err = c.f.WriteAt(delb, int64(addr+1))
 			if err != nil {
 				return err
 			}
-			c.h[addr] = sizeold
+			c.h[addr] = headerold.sizeb
 
 			// try to find optimal empty hole
 			for addrh, sizeh := range c.h {
-				if sizeh == sizeb {
+				if sizeh == header.sizeb {
 					pos = int64(addrh)
 					delete(c.h, addrh)
 					break
@@ -188,12 +272,12 @@ func (c *chunk) set(k, v []byte, h uint32) (err error) {
 	if err != nil {
 		return err
 	}
-	c.m[h] = addrSizeMarshal(uint32(pos), sizeb)
+	c.m[h] = addrSizeMarshal(uint32(pos), header.sizeb)
 	return
 }
 
 // get return val by key
-func (c *chunk) get(k []byte, h uint32) (v []byte, err error) {
+func (c *chunk) get(k []byte, h uint32) (v []byte, header *Header, err error) {
 	c.RLock()
 	defer c.RUnlock()
 	if addrsize, ok := c.m[h]; ok {
@@ -203,13 +287,22 @@ func (c *chunk) get(k []byte, h uint32) (v []byte, err error) {
 		if err != nil {
 			return
 		}
-		key, val, _ := packetUnmarshal(packet)
+		header, key, val := packetUnmarshal(packet)
 		if !bytes.Equal(key, k) {
-			return nil, ErrCollision
+			return nil, nil, ErrCollision
+		}
+		if header.expire != 0 && int64(header.expire) < time.Now().Unix() {
+			c.RUnlock()
+			_, err := c.delete(k, h)
+			c.RLock()
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, nil, ErrNotFound
 		}
 		v = val
 	} else {
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
 	return
 }
@@ -250,19 +343,18 @@ func (c *chunk) delete(k []byte, h uint32) (isDeleted bool, err error) {
 		if err != nil {
 			return
 		}
-		key, _, sizeb := packetUnmarshal(packet)
+		header, key, _ := packetUnmarshal(packet)
 		if !bytes.Equal(key, k) {
 			return false, ErrCollision
 		}
 
-		delb := make([]byte, 1)
-		delb[0] = deleted
+		delb := []byte{deleted}
 		_, err = c.f.WriteAt(delb, int64(addr+1))
 		if err != nil {
 			return
 		}
 		delete(c.m, h)
-		c.h[addr] = sizeb
+		c.h[addr] = header.sizeb
 		isDeleted = true
 	}
 	return
@@ -272,7 +364,12 @@ func (c *chunk) delete(k []byte, h uint32) (isDeleted bool, err error) {
 func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uint64, err error) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	old, err := c.get(k, h)
+	old, header, err := c.get(k, h)
+	expire := uint32(0)
+	if header != nil {
+		expire = header.expire
+	}
+
 	if err == ErrNotFound {
 		//create empty counter
 		old = make([]byte, 8)
@@ -294,7 +391,7 @@ func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uin
 	}
 	new := make([]byte, 8)
 	binary.BigEndian.PutUint64(new, counter)
-	err = c.set(k, new, h)
+	err = c.set(k, new, h, expire)
 
 	return
 }

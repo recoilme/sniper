@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/lotsa"
@@ -88,10 +89,10 @@ func TestCmd(t *testing.T) {
 	s, err := Open(Dir("1"))
 	assert.NoError(t, err)
 
-	err = s.Set([]byte("hello"), []byte("go"))
+	err = s.Set([]byte("hello"), []byte("go"), 0)
 	assert.NoError(t, err)
 
-	err = s.Set([]byte("hello"), []byte("world"))
+	err = s.Set([]byte("hello"), []byte("world"), 0)
 	assert.NoError(t, err)
 
 	res, err := s.Get([]byte("hello"))
@@ -144,6 +145,7 @@ func TestCmd(t *testing.T) {
 
 	err = DeleteStore("1")
 	assert.NoError(t, err)
+
 	sniperBench(seed(100_000))
 }
 
@@ -205,7 +207,7 @@ func sniperBench(keys [][]byte, N int) {
 		b := make([]byte, 8)
 		binary.BigEndian.PutUint64(b, uint64(i))
 		//println("set", i, keys[i], b)
-		err := s.Set(keys[i], b)
+		err := s.Set(keys[i], b, 0)
 		if err == ErrCollision {
 			coll++
 			err = nil
@@ -255,9 +257,9 @@ func TestSingleFile(t *testing.T) {
 	DeleteStore("2")
 	s, err := Open(Dir("2"), ChunksCollision(0), ChunksTotal(1))
 	assert.NoError(t, err)
-	err = s.Set([]byte("mgdbywinfo"), []byte("1"))
+	err = s.Set([]byte("mgdbywinfo"), []byte("1"), 0)
 	assert.NoError(t, err)
-	err = s.Set([]byte("uzmqkfjche"), []byte("2"))
+	err = s.Set([]byte("uzmqkfjche"), []byte("2"), 0)
 	assert.NoError(t, err)
 
 	v, err := s.Get([]byte("uzmqkfjche"))
@@ -307,10 +309,10 @@ func TestEmptyKey(t *testing.T) {
 	s, err := Open(Dir("1"))
 	assert.NoError(t, err)
 
-	err = s.Set([]byte(""), []byte("go"))
+	err = s.Set([]byte(""), []byte("go"), 0)
 	assert.NoError(t, err)
 
-	err = s.Set([]byte(""), []byte("world"))
+	err = s.Set([]byte(""), []byte("world"), 0)
 	assert.NoError(t, err)
 
 	res, err := s.Get([]byte(""))
@@ -319,6 +321,75 @@ func TestEmptyKey(t *testing.T) {
 	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
 
 	assert.Equal(t, 1, s.Count())
+
+	err = s.Close()
+	assert.NoError(t, err)
+
+	err = DeleteStore("1")
+	assert.NoError(t, err)
+}
+
+func TestExpireKey(t *testing.T) {
+	err := DeleteStore("1")
+	assert.NoError(t, err)
+
+	s, err := Open(Dir("1"))
+	assert.NoError(t, err)
+
+	unixtime := uint32(time.Now().Unix())
+
+	// set key with expire 1 sec
+	err = s.Set([]byte("key1"), []byte("go"), unixtime+1)
+	assert.NoError(t, err)
+
+	// set key with expire 3 sec
+	err = s.Set([]byte("key2"), []byte("world"), unixtime+3)
+	assert.NoError(t, err)
+
+	// try get key1
+	res, err := s.Get([]byte("key1"))
+	assert.NoError(t, err)
+
+	assert.Equal(t, true, bytes.Equal(res, []byte("go")))
+
+	assert.Equal(t, 2, s.Count())
+
+	// sleep 2 sec, key1 should expired
+	time.Sleep(time.Second * 2)
+
+	res, err = s.Get([]byte("key1"))
+	assert.Equal(t, ErrNotFound, err)
+
+	assert.Equal(t, 1, s.Count())
+
+	// key2 must exist
+	res, err = s.Get([]byte("key2"))
+	assert.NoError(t, err)
+
+	assert.Equal(t, true, bytes.Equal(res, []byte("world")))
+
+	// sleep 2 sec, key1 should expired
+	time.Sleep(time.Second * 2)
+
+	res, err = s.Get([]byte("key2"))
+	assert.Equal(t, ErrNotFound, err)
+
+	// all keys expired
+	assert.Equal(t, 0, s.Count())
+
+	unixtime = uint32(time.Now().Unix())
+
+	err = s.Set([]byte("key1"), []byte("go"), unixtime+1)
+	assert.NoError(t, err)
+
+	// sleep 2 sec, key1 should expired
+	time.Sleep(time.Second * 2)
+
+	err = s.Expire()
+	assert.NoError(t, err)
+
+	// all keys expired
+	assert.Equal(t, 0, s.Count())
 
 	err = s.Close()
 	assert.NoError(t, err)
