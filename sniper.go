@@ -15,8 +15,6 @@ import (
 
 const dirMode = 0755
 const fileMode = 0644
-const sizeHead = 12
-const deleted = 42 // flag for removed, tribute 2 dbf
 
 //ErrCollision -  must not happen
 var ErrCollision = errors.New("Error, hash collision")
@@ -191,16 +189,6 @@ func Open(opts ...OptStore) (s *Store, err error) {
 	}
 	s.ss = sortedset.New()
 	return
-}
-
-// pack addr & size to addrSize
-func addrSizeMarshal(addr uint32, size byte) addrSize {
-	return addrSize{addr, size}
-}
-
-// unpack addr & size
-func addrSizeUnmarshal(as addrSize) (addr, size uint32) {
-	return as.addr, 1 << as.size
 }
 
 func (s *Store) idx(h uint32) uint32 {

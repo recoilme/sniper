@@ -11,6 +11,17 @@ import (
 	"time"
 )
 
+const (
+	chunkVersion  = 1
+	versionMarker = 255
+	deleted       = 42 // flag for removed, tribute 2 dbf
+)
+
+var (
+	sizeHeaders = map[int]uint32{0: 8, 1: 12}
+	sizeHead    = sizeHeaders[chunkVersion]
+)
+
 // chunk - local shard
 type chunk struct {
 	sync.RWMutex
@@ -67,6 +78,31 @@ func NextPowerOf2(v uint32) (power byte, val uint32) {
 	return
 }
 
+func detectChunkVersion(file *os.File) (version int, err error) {
+	b := make([]byte, 2)
+	n, errRead := file.Read(b)
+	if errRead != nil {
+		return -1, errRead
+	}
+	if n != 2 {
+		return -1, errors.New("File too short")
+	}
+
+	// 255 version marker
+	if b[0] == versionMarker {
+		if b[1] == 0 || b[1] == deleted {
+			// first version
+			return 0, nil
+		}
+		return int(b[1]), nil
+	}
+	if b[1] == 0 || b[1] == deleted {
+		// first version
+		return 0, nil
+	}
+	return -1, nil
+}
+
 func makeHeader(k, v []byte, expire uint32) (header *Header) {
 	header = &Header{}
 	header.status = 0
@@ -75,6 +111,15 @@ func makeHeader(k, v []byte, expire uint32) (header *Header) {
 	header.expire = expire
 	sizeb, _ := NextPowerOf2(uint32(header.keylen) + header.vallen + sizeHead)
 	header.sizeb = sizeb
+	return
+}
+
+func parseHeaderV0(b []byte) (header *Header) {
+	header = &Header{}
+	header.sizeb = b[0]
+	header.status = b[1]
+	header.keylen = binary.BigEndian.Uint16(b[2:4])
+	header.vallen = binary.BigEndian.Uint32(b[4:8])
 	return
 }
 
@@ -88,6 +133,26 @@ func parseHeader(b []byte) (header *Header) {
 	return
 }
 
+func readHeader(file *os.File, version int) (header *Header, err error) {
+	b := make([]byte, sizeHeaders[version])
+	n, errRead := file.Read(b)
+	if errRead != nil || n != int(sizeHeaders[version]) {
+		if errRead != nil && errRead.Error() != "EOF" {
+			err = errRead
+		}
+		return
+	}
+	switch version {
+	case 0:
+		header = parseHeaderV0(b)
+	case 1:
+		header = parseHeader(b)
+	default:
+		err = fmt.Errorf("Unknov header version %d", version)
+	}
+	return
+}
+
 func writeHeader(b []byte, header *Header) {
 	b[0] = header.sizeb
 	b[1] = header.status
@@ -95,6 +160,16 @@ func writeHeader(b []byte, header *Header) {
 	binary.BigEndian.PutUint32(b[4:8], header.vallen)
 	binary.BigEndian.PutUint32(b[8:12], header.expire)
 	return
+}
+
+// pack addr & size to addrSize
+func addrSizeMarshal(addr uint32, size byte) addrSize {
+	return addrSize{addr, size}
+}
+
+// unpack addr & size
+func addrSizeUnmarshal(as addrSize) (addr, size uint32) {
+	return as.addr, 1 << as.size
 }
 
 func packetMarshal(k, v []byte, expire uint32) (header *Header, b []byte) {
@@ -133,22 +208,106 @@ func (c *chunk) init(name string) (err error) {
 	c.h = make(map[uint32]byte)
 	//read if f not empty
 	if fi, e := c.f.Stat(); e == nil {
+		// new file
 		if fi.Size() == 0 {
+			// write chunk version info
+			c.f.Write([]byte{versionMarker, chunkVersion})
 			return
 		}
+
 		//read file
 		var seek int
-		for {
-			b := make([]byte, sizeHead)
-			n, errRead := c.f.Read(b)
-			if errRead != nil || n != sizeHead {
-				if errRead != nil && errRead.Error() != "EOF" {
-					err = errRead
+		// detect chunk version
+		version, errDetect := detectChunkVersion(f)
+		if errDetect != nil {
+			err = errDetect
+			return
+		}
+
+		if version < 0 || version > 1 {
+			err = errors.New("Unknown chunk version in file " + name)
+			return
+		}
+
+		if version == 0 {
+			// rewind to begin
+			c.f.Seek(0, 0)
+		} else {
+			// real chunk begin
+			seek = 2
+		}
+
+		// if load chunk with old version create file in new format
+		if version != chunkVersion {
+			var newfile *os.File
+			fmt.Printf("Load from old version chunk %s, do inplace upgrade %d -> %d\n", name, version, chunkVersion)
+			newname := name + ".new"
+			newfile, err = os.OpenFile(newname, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(fileMode))
+			if err != nil {
+				return
+			}
+			// write chunk version info
+			newfile.Write([]byte{versionMarker, chunkVersion})
+			seek := 2
+			for {
+				var header *Header
+				var errRead error
+				header, errRead = readHeader(c.f, version)
+				if errRead != nil {
+					newfile.Close()
+					return
 				}
+				size := 1 << header.sizeb // entry size
+				b := make([]byte, size)
+				writeHeader(b, header)
+				n, errRead := c.f.Read(b[sizeHead:])
+				if errRead != nil {
+					return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+				}
+				if n != size-int(sizeHead) {
+					return fmt.Errorf("n != record length: %w", ErrFormat)
+				}
+
+				// skip deleted or expired entry
+				if header.status == deleted || (header.expire != 0 || int64(header.expire) < time.Now().Unix()) {
+					continue
+				}
+				keyidx := int(sizeHead) + int(header.vallen)
+				h := hash(b[keyidx : keyidx+int(header.keylen)])
+				c.m[h] = addrSizeMarshal(uint32(seek), header.sizeb)
+				n, errRead = newfile.Write(b)
+				if errRead != nil {
+					return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+				}
+			}
+			// close old chunk file
+			errRead := c.f.Close()
+			if errRead != nil {
+				return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+			}
+			// set new file for chunk
+			c.f = newfile
+			// remove old chunk file from disk
+			errRead = os.Remove(name)
+			if errRead != nil {
+				return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+			}
+			// rename new file to old file
+			errRead = os.Rename(newname, name)
+			if errRead != nil {
+				return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+			}
+		}
+
+		var n int
+		for {
+			header, errRead := readHeader(c.f, version)
+			if errRead != nil {
+				return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+			}
+			if header == nil {
 				break
 			}
-			//readed header
-			header := parseHeader(b)
 			// skip val
 			_, seekerr := c.f.Seek(int64(header.vallen), 1)
 			if seekerr != nil {
@@ -163,8 +322,8 @@ func (c *chunk) init(name string) (err error) {
 			if n != int(header.keylen) {
 				return fmt.Errorf("n != key length: %w", ErrFormat)
 			}
-			shiftv := 1 << header.sizeb                                                               //2^pow
-			ret, seekerr := c.f.Seek(int64(shiftv-int(header.keylen)-int(header.vallen)-sizeHead), 1) // skip empty tail
+			shiftv := 1 << header.sizeb                                                                    //2^pow
+			ret, seekerr := c.f.Seek(int64(shiftv-int(header.keylen)-int(header.vallen)-int(sizeHead)), 1) // skip empty tail
 			if seekerr != nil {
 				return ErrFormat
 			}
