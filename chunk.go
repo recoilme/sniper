@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"sync"
 	"time"
@@ -218,7 +217,7 @@ func (c *chunk) init(name string) (err error) {
 		//read file
 		var seek int
 		// detect chunk version
-		version, errDetect := detectChunkVersion(f)
+		version, errDetect := detectChunkVersion(c.f)
 		if errDetect != nil {
 			err = errDetect
 			return
@@ -255,7 +254,10 @@ func (c *chunk) init(name string) (err error) {
 				header, errRead = readHeader(c.f, version)
 				if errRead != nil {
 					newfile.Close()
-					return
+					return errRead
+				}
+				if header == nil {
+					break
 				}
 				size := 1 << header.sizeb // entry size
 				b := make([]byte, size)
@@ -269,7 +271,7 @@ func (c *chunk) init(name string) (err error) {
 				}
 
 				// skip deleted or expired entry
-				if header.status == deleted || (header.expire != 0 || int64(header.expire) < time.Now().Unix()) {
+				if header.status == deleted || (header.expire != 0 && int64(header.expire) < time.Now().Unix()) {
 					continue
 				}
 				keyidx := int(sizeHead) + int(header.vallen)
@@ -297,6 +299,7 @@ func (c *chunk) init(name string) (err error) {
 			if errRead != nil {
 				return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
 			}
+			return
 		}
 
 		var n int
@@ -555,30 +558,49 @@ func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uin
 	return
 }
 
-func (c *chunk) backup() (err error) {
+func (c *chunk) backup(file *os.File) (err error) {
 	c.Lock()
 	defer c.Unlock()
-	name := c.f.Name() + ".bak"
-	os.Remove(name)
+	_, seekerr := c.f.Seek(2, 0)
+	if seekerr != nil {
+		return fmt.Errorf("%s: %w", seekerr.Error(), ErrFormat)
+	}
 
-	dest, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR, os.FileMode(fileMode))
-	if err != nil {
-		return
+	for {
+		var header *Header
+		var errRead error
+		header, errRead = readHeader(c.f, chunkVersion)
+		if errRead != nil {
+			return errRead
+		}
+		if header == nil {
+			break
+		}
+		size := int(sizeHead) + int(header.vallen) + int(header.keylen) // record size
+		b := make([]byte, size)
+		writeHeader(b, header)
+		n, errRead := c.f.Read(b[sizeHead:])
+		if errRead != nil {
+			return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+		}
+		if n != size-int(sizeHead) {
+			return fmt.Errorf("n != record length: %d != %d %w", n, size-int(sizeHead), ErrFormat)
+		}
+
+		shiftv := 1 << header.sizeb                                                                  //2^pow
+		_, seekerr := c.f.Seek(int64(shiftv-int(header.keylen)-int(header.vallen)-int(sizeHead)), 1) // skip empty tail
+		if seekerr != nil {
+			return ErrFormat
+		}
+
+		// skip deleted or expired entry
+		if header.status == deleted || (header.expire != 0 && int64(header.expire) < time.Now().Unix()) {
+			continue
+		}
+		n, errRead = file.Write(b)
+		if errRead != nil {
+			return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+		}
 	}
-	err = c.f.Sync()
-	if err != nil {
-		return
-	}
-	_, err = c.f.Seek(0, 0)
-	if err != nil {
-		return
-	}
-	if _, err = io.Copy(dest, c.f); err != nil {
-		return
-	}
-	err = dest.Sync()
-	if err != nil {
-		return
-	}
-	return dest.Close()
+	return nil
 }

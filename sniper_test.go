@@ -137,9 +137,6 @@ func TestCmd(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, uint64(18446744073709551615), uint64(cnt))
 
-	err = s.Backup()
-	assert.NoError(t, err)
-
 	err = s.Close()
 	assert.NoError(t, err)
 
@@ -395,5 +392,70 @@ func TestExpireKey(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = DeleteStore("1")
+	assert.NoError(t, err)
+}
+
+func getRandKey(rnd *rand.Rand, n int) []byte {
+	s := make([]byte, n)
+	rnd.Read(s)
+	for i := 0; i < n; i++ {
+		s[i] = 'a' + (s[i] % 26)
+	}
+	return s
+}
+
+func TestBackup(t *testing.T) {
+	var backup = "data1.backup"
+
+	os.Remove(backup)
+	err := DeleteStore("1")
+	assert.NoError(t, err)
+
+	s, err := Open(Dir("1"))
+	assert.NoError(t, err)
+
+	seed := time.Now().UnixNano()
+	rng := rand.New(rand.NewSource(seed))
+	coll := 0
+
+	for i := 0; i < 1000000; i++ {
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, uint64(i))
+		err := s.Set(getRandKey(rng, 10), b, 0)
+		if err == ErrCollision {
+			coll++
+			err = nil
+		}
+		if err != nil {
+			panic(err)
+		}
+	}
+	// count keys
+	keys1 := s.Count()
+	// create backup
+	err = s.Backup(backup)
+	if err != nil {
+		panic(err)
+	}
+	err = s.Close()
+	assert.NoError(t, err)
+
+	err = DeleteStore("1")
+	assert.NoError(t, err)
+
+	s, err = Open(Dir("1"))
+	assert.NoError(t, err)
+
+	err = s.Restore(backup)
+	keys2 := s.Count()
+	assert.Equal(t, keys1, keys2)
+
+	err = s.Close()
+	assert.NoError(t, err)
+
+	err = DeleteStore("1")
+	assert.NoError(t, err)
+
+	err = os.Remove(backup)
 	assert.NoError(t, err)
 }

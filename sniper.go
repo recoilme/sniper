@@ -311,14 +311,63 @@ func (s *Store) Decr(k []byte, v uint64) (uint64, error) {
 	return s.chunks[idx].incrdecr(k, h, v, false)
 }
 
-// Backup is very stupid now. It remove files with same name with bak extension
-// and create new backup files
-func (s *Store) Backup() (err error) {
+// Backup all data into one file
+func (s *Store) Backup(name string) (err error) {
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_EXCL, os.FileMode(fileMode))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.Write([]byte{chunkVersion})
 	for i := range s.chunks[:] {
-		err = s.chunks[i].backup()
+		err = s.chunks[i].backup(file)
 		if err != nil {
 			return
 		}
+	}
+	return
+}
+
+// Restore from backup file
+func (s *Store) Restore(name string) (err error) {
+	file, err := os.OpenFile(name, os.O_RDONLY, os.FileMode(fileMode))
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	b := make([]byte, 1)
+	_, err = file.Read(b)
+	if int(b[0]) != chunkVersion {
+		return fmt.Errorf("Bad backup version %d", b[0])
+	}
+
+	for {
+		var header *Header
+		var errRead error
+		header, errRead = readHeader(file, chunkVersion)
+		if errRead != nil {
+			return errRead
+		}
+		if header == nil {
+			break
+		}
+		size := int(sizeHead) + int(header.vallen) + int(header.keylen) // record size
+		b := make([]byte, size)
+		writeHeader(b, header)
+		n, errRead := file.Read(b[sizeHead:])
+		if errRead != nil {
+			return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
+		}
+		if n != size-int(sizeHead) {
+			return fmt.Errorf("n != record length: %w", ErrFormat)
+		}
+
+		// skip deleted or expired entry
+		if header.status == deleted || (header.expire != 0 && int64(header.expire) < time.Now().Unix()) {
+			continue
+		}
+		_, key, val := packetUnmarshal(b)
+		s.Set(key, val, header.expire)
 	}
 	return
 }
