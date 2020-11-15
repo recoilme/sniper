@@ -239,7 +239,7 @@ func (c *chunk) init(name string) (err error) {
 		// if load chunk with old version create file in new format
 		if version != chunkVersion {
 			var newfile *os.File
-			fmt.Printf("Load from old version chunk %s, do inplace upgrade %d -> %d\n", name, version, chunkVersion)
+			fmt.Printf("Load from old version chunk %s, do inplace upgrade v%d -> v%d\n", name, version, chunkVersion)
 			newname := name + ".new"
 			newfile, err = os.OpenFile(newname, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(fileMode))
 			if err != nil {
@@ -248,6 +248,8 @@ func (c *chunk) init(name string) (err error) {
 			// write chunk version info
 			newfile.Write([]byte{versionMarker, chunkVersion})
 			seek := 2
+			oldsizehead := sizeHeaders[version]
+			sizediff := sizeHead - oldsizehead
 			for {
 				var header *Header
 				var errRead error
@@ -259,14 +261,16 @@ func (c *chunk) init(name string) (err error) {
 				if header == nil {
 					break
 				}
-				size := 1 << header.sizeb // entry size
-				b := make([]byte, size)
+				oldsizedata := (1 << header.sizeb) - oldsizehead
+				sizeb, size := NextPowerOf2(uint32(sizeHead) + uint32(header.keylen) + header.vallen)
+				header.sizeb = sizeb
+				b := make([]byte, size+sizediff)
 				writeHeader(b, header)
-				n, errRead := c.f.Read(b[sizeHead:])
+				n, errRead := c.f.Read(b[sizeHead : sizeHead+oldsizedata])
 				if errRead != nil {
 					return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
 				}
-				if n != size-int(sizeHead) {
+				if n != int(oldsizedata) {
 					return fmt.Errorf("n != record length: %w", ErrFormat)
 				}
 
@@ -277,7 +281,7 @@ func (c *chunk) init(name string) (err error) {
 				keyidx := int(sizeHead) + int(header.vallen)
 				h := hash(b[keyidx : keyidx+int(header.keylen)])
 				c.m[h] = addrSizeMarshal(uint32(seek), header.sizeb)
-				n, errRead = newfile.Write(b)
+				n, errRead = newfile.Write(b[0:size])
 				if errRead != nil {
 					return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
 				}

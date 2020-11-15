@@ -179,13 +179,41 @@ func Open(opts ...OptStore) (s *Store, err error) {
 	}
 	s.chunks = make([]chunk, s.chunksCnt)
 
-	// create chuncks
-	for i := range s.chunks[:] {
+	chchan := make(chan int, s.chunksCnt)
+	errchan := make(chan error, 4)
+	var wg sync.WaitGroup
 
-		err = s.chunks[i].init(fmt.Sprintf("%s/%d", s.dir, i))
-		if err != nil {
-			return nil, err
-		}
+	exitworkers := false
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			for i := range chchan {
+				if exitworkers {
+					break
+				}
+
+				err := s.chunks[i].init(fmt.Sprintf("%s/%d", s.dir, i))
+				if err != nil {
+					errchan <- err
+					exitworkers = true
+					break
+				}
+			}
+			wg.Done()
+		}()
+	}
+
+	// create chuncks
+	for i := range s.chunks {
+		chchan <- i
+	}
+	close(chchan)
+
+	wg.Wait()
+
+	if len(errchan) > 0 {
+		err = <-errchan
+		return
 	}
 	s.ss = sortedset.New()
 	return
