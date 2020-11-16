@@ -285,6 +285,7 @@ func (c *chunk) init(name string) (err error) {
 				if errRead != nil {
 					return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
 				}
+				seek += n
 			}
 			// close old chunk file
 			errRead := c.f.Close()
