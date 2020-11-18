@@ -125,13 +125,10 @@ func ExpireInterval(interv time.Duration) OptStore {
 		s.expireInterval = interv
 		if interv > 0 {
 			s.expiv = interval.Set(func(t time.Time) {
-				t1 := time.Now().UnixNano()
 				err := s.chunks[expirechunk].expirekeys()
 				if err != nil {
 					fmt.Printf("Error expire:%s\n", err)
 				}
-				t2 := time.Now().UnixNano()
-				fmt.Printf("chuk expre %.6fs\n", float64(t2-t1)/1e9)
 				expirechunk++
 				if expirechunk >= s.chunksCnt {
 					expirechunk = 0

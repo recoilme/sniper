@@ -447,7 +447,6 @@ func (c *chunk) set(k, v []byte, h uint32, expire uint32) (err error) {
 func (c *chunk) touch(k []byte, h uint32, expire uint32) (err error) {
 	c.Lock()
 	defer c.Unlock()
-	c.needFsync = true
 
 	if addrsize, ok := c.m[h]; ok {
 		addr, size := addrSizeUnmarshal(addrsize)
@@ -460,6 +459,10 @@ func (c *chunk) touch(k []byte, h uint32, expire uint32) (err error) {
 		if !bytes.Equal(key, k) {
 			return ErrCollision
 		}
+		if header.expire != 0 && int64(header.expire) < time.Now().Unix() {
+			return ErrNotFound
+		}
+
 		header.expire = expire
 		b := make([]byte, sizeHead)
 		writeHeader(b, header)
@@ -467,6 +470,7 @@ func (c *chunk) touch(k []byte, h uint32, expire uint32) (err error) {
 		if err != nil {
 			return err
 		}
+		c.needFsync = true
 
 	} else {
 		return ErrNotFound
