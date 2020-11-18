@@ -242,6 +242,23 @@ func (s *Store) Set(k, v []byte, expire uint32) (err error) {
 	return
 }
 
+// Touch - update key expire
+func (s *Store) Touch(k []byte, expire uint32) (err error) {
+	h := hash(k)
+	idx := s.idx(h)
+	err = s.chunks[idx].touch(k, h, expire)
+	if err == ErrCollision {
+		for i := 0; i < int(s.chunkColCnt); i++ {
+			err = s.chunks[i].touch(k, h, expire)
+			if err == ErrCollision {
+				continue
+			}
+			break
+		}
+	}
+	return
+}
+
 // Get - return val by key
 func (s *Store) Get(k []byte) (v []byte, err error) {
 	h := hash(k)

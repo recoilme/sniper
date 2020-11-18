@@ -409,7 +409,7 @@ func (c *chunk) set(k, v []byte, h uint32, expire uint32) (err error) {
 			return ErrCollision
 		}
 
-		if err == nil && headerold.sizeb == header.sizeb {
+		if headerold.sizeb == header.sizeb {
 			//overwrite
 			pos = int64(addr)
 		} else {
@@ -440,6 +440,37 @@ func (c *chunk) set(k, v []byte, h uint32, expire uint32) (err error) {
 		return err
 	}
 	c.m[h] = addrSizeMarshal(uint32(pos), header.sizeb)
+	return
+}
+
+// touch - write data to file & in map
+func (c *chunk) touch(k []byte, h uint32, expire uint32) (err error) {
+	c.Lock()
+	defer c.Unlock()
+	c.needFsync = true
+
+	if addrsize, ok := c.m[h]; ok {
+		addr, size := addrSizeUnmarshal(addrsize)
+		packet := make([]byte, size)
+		_, err = c.f.ReadAt(packet, int64(addr))
+		if err != nil {
+			return err
+		}
+		header, key, _ := packetUnmarshal(packet)
+		if !bytes.Equal(key, k) {
+			return ErrCollision
+		}
+		header.expire = expire
+		b := make([]byte, sizeHead)
+		writeHeader(b, header)
+		_, err = c.f.WriteAt(b, int64(addr))
+		if err != nil {
+			return err
+		}
+
+	} else {
+		return ErrNotFound
+	}
 	return
 }
 

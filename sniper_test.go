@@ -374,6 +374,7 @@ func TestExpireKey(t *testing.T) {
 	// all keys expired
 	assert.Equal(t, 0, s.Count())
 
+	/* test Expire method */
 	unixtime = uint32(time.Now().Unix())
 
 	err = s.Set([]byte("key1"), []byte("go"), unixtime+1)
@@ -381,7 +382,34 @@ func TestExpireKey(t *testing.T) {
 
 	// sleep 2 sec, key1 should expired
 	time.Sleep(time.Second * 2)
+	err = s.Expire()
+	assert.NoError(t, err)
 
+	// all keys expired
+	assert.Equal(t, 0, s.Count())
+
+	/* test touch */
+	unixtime = uint32(time.Now().Unix())
+
+	err = s.Set([]byte("key"), []byte("go"), unixtime+4)
+	assert.NoError(t, err)
+
+	// sleep 2 sec, key1 should stay
+	time.Sleep(time.Second * 2)
+	res, err = s.Get([]byte("key"))
+	assert.NoError(t, err)
+
+	unixtime = uint32(time.Now().Unix())
+	err = s.Touch([]byte("key"), unixtime+3)
+	assert.NoError(t, err)
+
+	// sleep 3 sec, key1 should stay
+	time.Sleep(time.Second * 3)
+	res, err = s.Get([]byte("key"))
+	assert.NoError(t, err)
+
+	// sleep 3 sec, key should expired
+	time.Sleep(time.Second * 3)
 	err = s.Expire()
 	assert.NoError(t, err)
 
