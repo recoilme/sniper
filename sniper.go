@@ -1,8 +1,10 @@
 package sniper
 
 import (
+	"compress/gzip"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -353,16 +355,14 @@ func (s *Store) Decr(k []byte, v uint64) (uint64, error) {
 	return s.chunks[idx].incrdecr(k, h, v, false)
 }
 
-// Backup all data into one file
-func (s *Store) Backup(name string) (err error) {
-	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_EXCL, os.FileMode(fileMode))
+// Backup all data to writer
+func (s *Store) Backup(w io.Writer) (err error) {
+	_, err = w.Write([]byte{chunkVersion})
 	if err != nil {
-		return err
+		return
 	}
-	defer file.Close()
-	_, err = file.Write([]byte{chunkVersion})
 	for i := range s.chunks[:] {
-		err = s.chunks[i].backup(file)
+		err = s.chunks[i].backup(w)
 		if err != nil {
 			return
 		}
@@ -370,15 +370,10 @@ func (s *Store) Backup(name string) (err error) {
 	return
 }
 
-// Restore from backup file
-func (s *Store) Restore(name string) (err error) {
-	file, err := os.OpenFile(name, os.O_RDONLY, os.FileMode(fileMode))
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+// Restore from backup reader
+func (s *Store) Restore(r io.Reader) (err error) {
 	b := make([]byte, 1)
-	_, err = file.Read(b)
+	_, err = r.Read(b)
 	if int(b[0]) != chunkVersion {
 		return fmt.Errorf("Bad backup version %d", b[0])
 	}
@@ -386,7 +381,7 @@ func (s *Store) Restore(name string) (err error) {
 	for {
 		var header *Header
 		var errRead error
-		header, errRead = readHeader(file, chunkVersion)
+		header, errRead = readHeader(r, chunkVersion)
 		if errRead != nil {
 			return errRead
 		}
@@ -396,7 +391,7 @@ func (s *Store) Restore(name string) (err error) {
 		size := int(sizeHead) + int(header.vallen) + int(header.keylen) // record size
 		b := make([]byte, size)
 		writeHeader(b, header)
-		n, errRead := file.Read(b[sizeHead:])
+		n, errRead := io.ReadFull(r, b[sizeHead:])
 		if errRead != nil {
 			return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
 		}
@@ -412,6 +407,23 @@ func (s *Store) Restore(name string) (err error) {
 		s.Set(key, val, header.expire)
 	}
 	return
+}
+
+// Backup in gzip
+func (s *Store) BackupGZ(w io.Writer) (err error) {
+	gz := gzip.NewWriter(w)
+	defer gz.Close()
+	return s.Backup(gz)
+}
+
+// Restore from backup in gzip
+func (s *Store) RestoreGZ(r io.Reader) (err error) {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	return s.Restore(gz)
 }
 
 // Expire - remove expired keys from all chunks
