@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -132,12 +133,12 @@ func parseHeader(b []byte) (header *Header) {
 	return
 }
 
-func readHeader(file *os.File, version int) (header *Header, err error) {
+func readHeader(r io.Reader, version int) (header *Header, err error) {
 	b := make([]byte, sizeHeaders[version])
-	n, errRead := file.Read(b)
-	if errRead != nil || n != int(sizeHeaders[version]) {
-		if errRead != nil && errRead.Error() != "EOF" {
-			err = errRead
+	n, err := io.ReadFull(r, b)
+	if n != int(sizeHeaders[version]) {
+		if err == io.EOF {
+			err = nil
 		}
 		return
 	}
@@ -598,7 +599,7 @@ func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uin
 	return
 }
 
-func (c *chunk) backup(file *os.File) (err error) {
+func (c *chunk) backup(w io.Writer) (err error) {
 	c.Lock()
 	defer c.Unlock()
 	_, seekerr := c.f.Seek(2, 0)
@@ -637,7 +638,7 @@ func (c *chunk) backup(file *os.File) (err error) {
 		if header.status == deleted || (header.expire != 0 && int64(header.expire) < time.Now().Unix()) {
 			continue
 		}
-		n, errRead = file.Write(b)
+		n, errRead = w.Write(b)
 		if errRead != nil {
 			return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
 		}

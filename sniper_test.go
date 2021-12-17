@@ -433,9 +433,11 @@ func getRandKey(rnd *rand.Rand, n int) []byte {
 }
 
 func TestBackup(t *testing.T) {
-	var backup = "data1.backup"
+	var backup = "data1.backup.gz"
 
-	os.Remove(backup)
+	f, _ := os.Create(backup)
+	defer f.Close()
+
 	err := DeleteStore("1")
 	assert.NoError(t, err)
 
@@ -461,7 +463,7 @@ func TestBackup(t *testing.T) {
 	// count keys
 	keys1 := s.Count()
 	// create backup
-	err = s.Backup(backup)
+	err = s.BackupGZ(f)
 	if err != nil {
 		panic(err)
 	}
@@ -474,7 +476,11 @@ func TestBackup(t *testing.T) {
 	s, err = Open(Dir("1"))
 	assert.NoError(t, err)
 
-	err = s.Restore(backup)
+	f.Seek(0, 0)
+	err = s.RestoreGZ(f)
+	if err != nil {
+		panic(err)
+	}
 	keys2 := s.Count()
 	assert.Equal(t, keys1, keys2)
 
