@@ -22,6 +22,11 @@ var (
 	sizeHead    = sizeHeaders[chunkVersion]
 )
 
+var (
+	ErrIncrDecr  = errors.New("incrdecr: unexpected value format")
+	ErrChunkFile = errors.New("chunk: file too short")
+)
+
 // chunk - local shard
 type chunk struct {
 	sync.RWMutex
@@ -85,7 +90,7 @@ func detectChunkVersion(file *os.File) (version int, err error) {
 		return -1, errRead
 	}
 	if n != 2 {
-		return -1, errors.New("File too short")
+		return -1, ErrChunkFile
 	}
 
 	// 255 version marker
@@ -148,7 +153,7 @@ func readHeader(r io.Reader, version int) (header *Header, err error) {
 	case 1:
 		header = parseHeader(b)
 	default:
-		err = fmt.Errorf("Unknov header version %d", version)
+		err = fmt.Errorf("unknown header version %d", version)
 	}
 	return
 }
@@ -351,18 +356,19 @@ func (c *chunk) init(name string) (err error) {
 	return
 }
 
-//fsync commits the current contents of the file to stable storage
+// fsync commits the current contents of the file to stable storage
 func (c *chunk) fsync() error {
 	if c.needFsync {
 		c.Lock()
-		defer c.Unlock()
 		c.needFsync = false
-		return c.f.Sync()
+		err := c.f.Sync()
+		c.Unlock()
+		return err
 	}
 	return nil
 }
 
-//expirekeys walk all keys and delete expired
+// expirekeys walk all keys and delete expired
 func (c *chunk) expirekeys() error {
 	c.Lock()
 	defer c.Unlock()
@@ -392,6 +398,10 @@ func (c *chunk) expirekeys() error {
 func (c *chunk) set(k, v []byte, h uint32, expire uint32) (err error) {
 	c.Lock()
 	defer c.Unlock()
+	return c.__set(k, v, h, expire)
+}
+
+func (c *chunk) __set(k, v []byte, h uint32, expire uint32) (err error) {
 	c.needFsync = true
 	header, b := packetMarshal(k, v, expire)
 	// write at file
@@ -435,6 +445,9 @@ func (c *chunk) set(k, v []byte, h uint32, expire uint32) (err error) {
 	// write at end or in hole or overwrite
 	if pos < 0 {
 		pos, err = c.f.Seek(0, 2) // append to the end of file
+		if err != nil {
+			return err
+		}
 	}
 	_, err = c.f.WriteAt(b, pos)
 	if err != nil {
@@ -483,6 +496,10 @@ func (c *chunk) touch(k []byte, h uint32, expire uint32) (err error) {
 func (c *chunk) get(k []byte, h uint32) (v []byte, header *Header, err error) {
 	c.RLock()
 	defer c.RUnlock()
+	return c.__get(k, h)
+}
+
+func (c *chunk) __get(k []byte, h uint32) (v []byte, header *Header, err error) {
 	if addrsize, ok := c.m[h]; ok {
 		addr, size := addrSizeUnmarshal(addrsize)
 		packet := make([]byte, size)
@@ -490,10 +507,11 @@ func (c *chunk) get(k []byte, h uint32) (v []byte, header *Header, err error) {
 		if err != nil {
 			return
 		}
-		header, key, val := packetUnmarshal(packet)
+		header2, key, val := packetUnmarshal(packet)
 		if !bytes.Equal(key, k) {
 			return nil, nil, ErrCollision
 		}
+		header = header2
 		if header.expire != 0 && int64(header.expire) < time.Now().Unix() {
 			c.RUnlock()
 			_, err := c.delete(k, h)
@@ -513,15 +531,15 @@ func (c *chunk) get(k []byte, h uint32) (v []byte, header *Header, err error) {
 // return map length
 func (c *chunk) count() int {
 	c.RLock()
-	defer c.RUnlock()
-	return len(c.m)
+	n := len(c.m)
+	c.RUnlock()
+	return n
 }
 
 // close file
 func (c *chunk) close() (err error) {
 	c.Lock()
 	defer c.Unlock()
-
 	return c.f.Close()
 }
 
@@ -563,38 +581,41 @@ func (c *chunk) delete(k []byte, h uint32) (isDeleted bool, err error) {
 	return
 }
 
-// TODO - optimize
 func (c *chunk) incrdecr(k []byte, h uint32, v uint64, isIncr bool) (counter uint64, err error) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	old, header, err := c.get(k, h)
+	c.Lock()
+	defer c.Unlock()
+
 	expire := uint32(0)
+	val, header, err := c.__get(k, h)
+	if err != nil {
+		if err == ErrNotFound {
+			//create empty counter
+			val = make([]byte, 8)
+			err = nil
+		} else {
+			return
+		}
+	}
+
 	if header != nil {
 		expire = header.expire
 	}
 
-	if err == ErrNotFound {
-		//create empty counter
-		old = make([]byte, 8)
-		err = nil
-	}
-	if len(old) != 8 {
+	if len(val) != 8 {
 		//better, then panic
-		return 0, errors.New("Unexpected value format")
+		return 0, ErrIncrDecr
 	}
-	if err != nil {
-		return
-	}
-	counter = binary.BigEndian.Uint64(old)
+
+	// TODO() big -> little endian
+	counter = binary.BigEndian.Uint64(val)
 	if isIncr {
 		counter += v
 	} else {
 		//decr
 		counter -= v
 	}
-	new := make([]byte, 8)
-	binary.BigEndian.PutUint64(new, counter)
-	err = c.set(k, new, h, expire)
+	binary.BigEndian.PutUint64(val, counter)
+	err = c.__set(k, val, h, expire)
 
 	return
 }
@@ -638,7 +659,7 @@ func (c *chunk) backup(w io.Writer) (err error) {
 		if header.status == deleted || (header.expire != 0 && int64(header.expire) < time.Now().Unix()) {
 			continue
 		}
-		n, errRead = w.Write(b)
+		_, errRead = w.Write(b)
 		if errRead != nil {
 			return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
 		}

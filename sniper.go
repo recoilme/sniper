@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,17 +20,15 @@ import (
 const dirMode = 0755
 const fileMode = 0644
 
-//ErrCollision -  must not happen
-var ErrCollision = errors.New("Error, hash collision")
+// ErrCollision -  must not happen
+var ErrCollision = errors.New("sniper: hash collision")
 
 // ErrFormat unexpected file format
-var ErrFormat = errors.New("Error, unexpected file format")
+var ErrFormat = errors.New("sniper: unexpected file format")
 
 // ErrNotFound key not found error
-var ErrNotFound = errors.New("Error, key not found")
+var ErrNotFound = errors.New("sniper: key not found")
 
-var counters sync.Map
-var mutex = &sync.RWMutex{} //global mutex for counters and so on
 //var chunkColCnt uint32      //chunks for collisions resolving
 
 var expirechunk = 0 // numbeg chunk for next expiration
@@ -91,8 +91,8 @@ func ChunksCollision(chunks int) OptStore {
 	}
 }
 
-//ChunksTotal - total chunks/shards, default 256
-//Must be more then collision chunks
+// ChunksTotal - total chunks/shards, default 256
+// Must be more then collision chunks
 func ChunksTotal(chunks int) OptStore {
 	return func(s *Store) error {
 		s.chunksCnt = chunks
@@ -191,7 +191,7 @@ func Open(opts ...OptStore) (s *Store, err error) {
 					break
 				}
 
-				err := s.chunks[i].init(fmt.Sprintf("%s/%d", s.dir, i))
+				err := s.chunks[i].init(filepath.Join(s.dir, strconv.Itoa(i)))
 				if err != nil {
 					errchan <- err
 					exitworkers = true
@@ -375,7 +375,7 @@ func (s *Store) Restore(r io.Reader) (err error) {
 	b := make([]byte, 1)
 	_, err = r.Read(b)
 	if int(b[0]) != chunkVersion {
-		return fmt.Errorf("Bad backup version %d", b[0])
+		return fmt.Errorf("bad backup version %d", b[0])
 	}
 
 	for {
@@ -437,21 +437,6 @@ func (s *Store) Expire() (err error) {
 	return
 }
 
-func readUint32(b []byte) uint32 {
-	_ = b[3]
-	return uint32(b[3]) | uint32(b[2])<<8 | uint32(b[1])<<16 | uint32(b[0])<<24
-}
-
-func appendUint32(b []byte, x uint32) []byte {
-	a := [4]byte{
-		byte(x >> 24),
-		byte(x >> 16),
-		byte(x >> 8),
-		byte(x),
-	}
-	return append(b, a[:]...)
-}
-
 // Bucket - create new bucket for storing keys with same prefix in memory index
 func (s *Store) Bucket(name string) (*sortedset.BucketStore, error) {
 	// store all buckets in [buckets] key
@@ -486,14 +471,15 @@ func (s *Store) Bucket(name string) (*sortedset.BucketStore, error) {
 
 // Put - store key and val with Set
 // And add key in index (backed by sortedset)
-func (s *Store) Put(bucket *sortedset.BucketStore, k, v []byte) (err error) {
+func (s *Store) Put(bucket *sortedset.BucketStore, k, v []byte) error {
 	key := []byte(bucket.Name)
 	key = append(key, k...)
-	err = s.Set(key, v, 0)
-	if err == nil {
-		bucket.Put(string(k))
+	err := s.Set(key, v, 0)
+	if err != nil {
+		return err
 	}
-	return
+	bucket.Put(string(k))
+	return nil
 }
 
 // Keys will return keys stored with Put method

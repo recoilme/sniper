@@ -67,7 +67,7 @@ func sniperBench(keys [][]byte, N int) {
 	lotsa.Ops(N, runtime.NumCPU(), func(i, _ int) {
 		b := make([]byte, 8)
 		binary.BigEndian.PutUint64(b, uint64(i))
-		err := s.Set(keys[i], b)
+		err := s.Set(keys[i], b, 0)
 		if err == sniper.ErrCollision {
 			fmt.Println("ErrCollision, set:", string(keys[i]), err.Error())
 		}
