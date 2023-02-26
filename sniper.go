@@ -18,7 +18,7 @@ import (
 const dirMode = 0755
 const fileMode = 0644
 
-//ErrCollision -  must not happen
+// ErrCollision -  must not happen
 var ErrCollision = errors.New("Error, hash collision")
 
 // ErrFormat unexpected file format
@@ -37,9 +37,11 @@ var expirechunk = 0 // numbeg chunk for next expiration
 // data in store sharded by chunks
 type Store struct {
 	sync.RWMutex
-	chunksCnt      int
-	chunks         []chunk
-	chunkColCnt    int
+	chunks       []chunk
+	chunksCnt    int
+	chunksPrefix string
+	chunkColCnt  int
+
 	dir            string
 	syncInterval   time.Duration
 	iv             interval.Interval
@@ -79,7 +81,7 @@ func Dir(dir string) OptStore {
 	}
 }
 
-// ChunksCollision number chunks for collisions resolving,
+// ChunksCollision -  number chunks for collisions resolving,
 // default is 4 (>1_000_000_000 of 8 bytes alphabet keys without collision errors)
 // different keys may has same hash
 // collision chunks needed for resolving this, without collisions errors
@@ -91,11 +93,19 @@ func ChunksCollision(chunks int) OptStore {
 	}
 }
 
-//ChunksTotal - total chunks/shards, default 256
-//Must be more then collision chunks
+// ChunksTotal - total chunks/shards, default 256
+// Must be more then collision chunks
 func ChunksTotal(chunks int) OptStore {
 	return func(s *Store) error {
 		s.chunksCnt = chunks
+		return nil
+	}
+}
+
+// ChunksPrefix - prefix for a chunks filename
+func ChunksPrefix(prefix string) OptStore {
+	return func(s *Store) error {
+		s.chunksPrefix = prefix
 		return nil
 	}
 }
@@ -191,7 +201,13 @@ func Open(opts ...OptStore) (s *Store, err error) {
 					break
 				}
 
-				err := s.chunks[i].init(fmt.Sprintf("%s/%d", s.dir, i))
+				var filename string
+				if s.chunksPrefix != "" {
+					filename = fmt.Sprintf("%s/%s-%d", s.dir, s.chunksPrefix, i)
+				} else {
+					filename = fmt.Sprintf("%s/%d", s.dir, i)
+				}
+				err := s.chunks[i].init(filename)
 				if err != nil {
 					errchan <- err
 					exitworkers = true
