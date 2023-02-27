@@ -2,8 +2,6 @@ github.com/davecgh/go-spew v1.1.0 h1:ZDRjVQ15GmhC3fiQ8ni8+OwkZQO4DARzQgrnXU1Liz8
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/recoilme/sortedset v0.0.0-20200824122542-a0d1b745fbdd h1:BBOAfodNU0fFpQcD3/JjjMW0jEbzH+7A43ZeG1PPjSU=
-github.com/recoilme/sortedset v0.0.0-20200824122542-a0d1b745fbdd/go.mod h1:YB55h6bCtRPPhCT4AWwAwKtKBk7xP4b9cZgUMnsgpMo=
 github.com/recoilme/sortedset v0.0.0-20200825100557-fdc6fff0bc87 h1:WKeK1vEaQllmIkb9ik8aZ7VP5k/xDf0O/bnnt9uwuYc=
 github.com/recoilme/sortedset v0.0.0-20200825100557-fdc6fff0bc87/go.mod h1:YB55h6bCtRPPhCT4AWwAwKtKBk7xP4b9cZgUMnsgpMo=
 github.com/spaolacci/murmur3 v1.1.0 h1:7c1g84S4BPRrfL5Xrdp6fOJ206sU9y293DDHaoy0bLI=
