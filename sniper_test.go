@@ -18,8 +18,8 @@ import (
 func TestPack(t *testing.T) {
 	addr := 1<<26 - 5
 	size := byte(5)
-	expire := time.Now().Unix()
-	expire = expire >> 9 << 9
+	curtime := time.Now().Unix()
+	expire := uint32(curtime>>9) << 9
 	some64 := encodeKeyMeta(uint32(addr), size, expire)
 	expire += 1 << 9
 	s, l, e := decodeKeyMeta(some64)
@@ -29,8 +29,8 @@ func TestPack(t *testing.T) {
 	addr = 1<<28 - 1
 	size = byte(19)
 	exp, _ := time.Parse("2006-02-01 15:04:05", "2020-10-11 12:34:56")
-	expire = exp.Unix()
-	expire = expire >> 9 << 9
+	curtime = exp.Unix()
+	expire = uint32(curtime>>9) << 9
 	maxAddrSize := encodeKeyMeta(uint32(addr), size, expire)
 	expire += 1 << 9
 	s, l, e = decodeKeyMeta(maxAddrSize)

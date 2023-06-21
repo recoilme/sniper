@@ -39,14 +39,14 @@ type Header struct {
 	expire uint32
 }
 
-func encodeKeyMeta(addr uint32, size byte, expire int64) uint64 {
+func encodeKeyMeta(addr uint32, size byte, expire uint32) uint64 {
 	return uint64(addr)<<32 | uint64(size)<<24 | uint64(expire)>>9 + 1
 }
 
-func decodeKeyMeta(info uint64) (addr uint32, size byte, expire int64) {
+func decodeKeyMeta(info uint64) (addr uint32, size byte, expire uint32) {
 	addr = uint32(info >> 32)
 	size = byte(info >> 24 & 0xff)
-	expire = int64(info&0xffffff) << 9
+	expire = uint32(info&0xffffff) << 9
 	return
 }
 
@@ -281,7 +281,7 @@ func (c *chunk) init(name string) (err error) {
 				}
 				keyidx := int(sizeHead) + int(header.vallen)
 				h := hash(b[keyidx : keyidx+int(header.keylen)])
-				c.m[h] = encodeKeyMeta(uint32(seek), header.sizeb, int64(header.expire))
+				c.m[h] = encodeKeyMeta(uint32(seek), header.sizeb, header.expire)
 				n, errRead = newfile.Write(b[0:size])
 				if errRead != nil {
 					return fmt.Errorf("%s: %w", errRead.Error(), ErrFormat)
@@ -339,7 +339,7 @@ func (c *chunk) init(name string) (err error) {
 			// map store
 			if header.status != deleted && (header.expire == 0 || int64(header.expire) >= time.Now().Unix()) {
 				h := hash(key)
-				c.m[h] = encodeKeyMeta(uint32(seek), header.sizeb, int64(header.expire))
+				c.m[h] = encodeKeyMeta(uint32(seek), header.sizeb, header.expire)
 			} else {
 				//deleted blocks store
 				c.h[uint32(seek)] = header.sizeb // seek / size
@@ -376,7 +376,7 @@ func (c *chunk) expirekeys(maxruntime time.Duration) error {
 	c.RLock()
 	for h, meta := range c.m {
 		_, _, expire := decodeKeyMeta(meta)
-		if expire != 0 && curtime > expire {
+		if expire != 0 && curtime > int64(expire) {
 			expiredlist = append(expiredlist, h)
 		}
 	}
@@ -488,7 +488,7 @@ func (c *chunk) write_key(k, v []byte, h uint32, expire uint32) (err error) {
 	if err != nil {
 		return err
 	}
-	c.m[h] = encodeKeyMeta(uint32(pos), header.sizeb, int64(header.expire))
+	c.m[h] = encodeKeyMeta(uint32(pos), header.sizeb, header.expire)
 	return
 }
 
@@ -535,6 +535,7 @@ func (c *chunk) get(k []byte, h uint32) (v []byte, header *Header, err error) {
 	return
 }
 
+// test use prepared chunk file "testchunk"
 func (c *chunk) load_key(k []byte, h uint32) (v []byte, header *Header, err error) {
 	if meta, ok := c.m[h]; ok {
 		addr, size, _ := decodeKeyMeta(meta)
