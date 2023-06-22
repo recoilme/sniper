@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"bou.ke/monkey"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/lotsa"
 )
@@ -17,17 +18,24 @@ import (
 func TestPack(t *testing.T) {
 	addr := 1<<26 - 5
 	size := byte(5)
-	some32 := addrSizeMarshal(uint32(addr), size)
-	s, l := addrSizeUnmarshal(some32)
-	if s != uint32(addr) || l != 32 {
-		t.Errorf("get addr = %d, size=%d", s, l)
+	curtime := time.Now().Unix()
+	expire := uint32(curtime>>9) << 9
+	some64 := encodeKeyMeta(uint32(addr), size, expire)
+	expire += 1 << 9
+	s, l, e := decodeKeyMeta(some64)
+	if s != uint32(addr) || l != 5 || e != expire {
+		t.Errorf("get addr = %d, size=%d expire=%d", s, l, e)
 	}
 	addr = 1<<28 - 1
 	size = byte(19)
-	maxAddrSize := addrSizeMarshal(uint32(addr), size)
-	s, l = addrSizeUnmarshal(maxAddrSize)
-	if s != uint32(addr) || l != 524288 {
-		t.Errorf("get addr = %d, size=%d ", s, l)
+	exp, _ := time.Parse("2006-02-01 15:04:05", "2020-10-11 12:34:56")
+	curtime = exp.Unix()
+	expire = uint32(curtime>>9) << 9
+	maxAddrSize := encodeKeyMeta(uint32(addr), size, expire)
+	expire += 1 << 9
+	s, l, e = decodeKeyMeta(maxAddrSize)
+	if s != uint32(addr) || l != 19 || e != expire {
+		t.Errorf("get addr = %d, size=%d expire=%d", s, l, e)
 	}
 }
 
@@ -104,7 +112,6 @@ func TestCmd(t *testing.T) {
 
 	err = s.Close()
 	assert.NoError(t, err)
-
 	s, err = Open(Dir("1"))
 	assert.NoError(t, err)
 
@@ -380,10 +387,12 @@ func TestExpireKey(t *testing.T) {
 	err = s.Set([]byte("key1"), []byte("go"), unixtime+1)
 	assert.NoError(t, err)
 
-	// sleep 2 sec, key1 should expired
-	time.Sleep(time.Second * 2)
+	// shift time forward by 512s force expire delete old keys
+	patch := monkey.Patch(time.Now, func() time.Time { return time.Unix(int64(unixtime)+512, 0) })
+
 	err = s.Expire()
 	assert.NoError(t, err)
+	patch.Unpatch()
 
 	// all keys expired
 	assert.Equal(t, 0, s.Count())
@@ -408,10 +417,11 @@ func TestExpireKey(t *testing.T) {
 	res, err = s.Get([]byte("key"))
 	assert.NoError(t, err)
 
-	// sleep 3 sec, key should expired
-	time.Sleep(time.Second * 3)
+	// shift time forward by 512s force expire delete old keys
+	patch = monkey.Patch(time.Now, func() time.Time { return time.Unix(int64(unixtime)+512, 0) })
 	err = s.Expire()
 	assert.NoError(t, err)
+	patch.Unpatch()
 
 	// all keys expired
 	assert.Equal(t, 0, s.Count())
@@ -491,5 +501,31 @@ func TestBackup(t *testing.T) {
 	assert.NoError(t, err)
 
 	err = os.Remove(backup)
+	assert.NoError(t, err)
+}
+
+// test run only when set enviroment variable "TESTCHUNK"
+// test use prepared chunk file "testchunk"
+func TestExpireChunk(t *testing.T) {
+	if os.Getenv("TESTCHUNK") == "" {
+		t.SkipNow()
+	}
+	ch := chunk{}
+	err := ch.init("testchunk")
+	assert.NoError(t, err)
+
+	keys1 := ch.count()
+	t.Logf("before expire keys count %d", keys1)
+
+	newtime := time.Now().Add(time.Hour * 168)
+	// shift time forward by week force expire delete old keys
+	patch := monkey.Patch(time.Now, func() time.Time { return newtime })
+	ch.expirekeys(0)
+	patch.Unpatch()
+	keys2 := ch.count()
+	t.Logf("after expire keys count %d", keys2)
+	assert.Less(t, keys2, keys1, "Expire not work")
+
+	err = ch.close()
 	assert.NoError(t, err)
 }

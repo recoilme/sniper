@@ -3,6 +3,7 @@ module github.com/recoilme/sniper
 go 1.14
 
 require (
+	bou.ke/monkey v1.0.2 // indirect
 	github.com/recoilme/sortedset v0.0.0-20200825100557-fdc6fff0bc87
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.6.1

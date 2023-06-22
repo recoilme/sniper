@@ -28,7 +28,7 @@ var ErrFormat = errors.New("Error, unexpected file format")
 var ErrNotFound = errors.New("Error, key not found")
 
 var counters sync.Map
-var mutex = &sync.RWMutex{} //global mutex for counters and so on
+
 //var chunkColCnt uint32      //chunks for collisions resolving
 
 var expirechunk = 0 // numbeg chunk for next expiration
@@ -137,7 +137,7 @@ func ExpireInterval(interv time.Duration) OptStore {
 		s.expireInterval = interv
 		if interv > 0 {
 			s.expiv = interval.Set(func(t time.Time) {
-				err := s.chunks[expirechunk].expirekeys()
+				err := s.chunks[expirechunk].expirekeys(interv)
 				if err != nil {
 					fmt.Printf("Error expire:%s\n", err)
 				}
@@ -373,7 +373,7 @@ func (s *Store) Decr(k []byte, v uint64) (uint64, error) {
 
 // Backup all data to writer
 func (s *Store) Backup(w io.Writer) (err error) {
-	_, err = w.Write([]byte{chunkVersion})
+	_, err = w.Write([]byte{currentChunkVersion})
 	if err != nil {
 		return
 	}
@@ -390,14 +390,14 @@ func (s *Store) Backup(w io.Writer) (err error) {
 func (s *Store) Restore(r io.Reader) (err error) {
 	b := make([]byte, 1)
 	_, err = r.Read(b)
-	if int(b[0]) != chunkVersion {
+	if int(b[0]) != currentChunkVersion {
 		return fmt.Errorf("Bad backup version %d", b[0])
 	}
 
 	for {
 		var header *Header
 		var errRead error
-		header, errRead = readHeader(r, chunkVersion)
+		header, errRead = readHeader(r, currentChunkVersion)
 		if errRead != nil {
 			return errRead
 		}
@@ -445,7 +445,7 @@ func (s *Store) RestoreGZ(r io.Reader) (err error) {
 // Expire - remove expired keys from all chunks
 func (s *Store) Expire() (err error) {
 	for i := range s.chunks[:] {
-		err = s.chunks[i].expirekeys()
+		err = s.chunks[i].expirekeys(time.Duration(0))
 		if err != nil {
 			return
 		}
