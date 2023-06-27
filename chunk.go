@@ -367,7 +367,7 @@ func (c *chunk) fsync() error {
 func (c *chunk) expirekeys(maxruntime time.Duration) error {
 	starttime := time.Now().UnixMilli()
 	curtime := starttime / 1000
-	expiredlist := make([]uint32, 1024)
+	expiredlist := make([]uint32, 0, 1024)
 	if maxruntime.Seconds() > 1000 {
 		maxruntime = time.Duration(1000) * time.Second
 	}
@@ -385,7 +385,6 @@ func (c *chunk) expirekeys(maxruntime time.Duration) error {
 	if keycount == 0 {
 		return nil
 	}
-
 	sleeptime := maxruntime.Milliseconds() / int64(keycount)
 	if sleeptime < 1 {
 		sleeptime = 1
