@@ -21,7 +21,7 @@ func TestPack(t *testing.T) {
 	curtime := time.Now().Unix()
 	expire := uint32(curtime>>9) << 9
 	some64 := encodeKeyMeta(uint32(addr), size, expire)
-	expire += 1 << 9
+	expire += 1<<9 - 1
 	s, l, e := decodeKeyMeta(some64)
 	if s != uint32(addr) || l != 5 || e != expire {
 		t.Errorf("get addr = %d, size=%d expire=%d", s, l, e)
@@ -32,7 +32,7 @@ func TestPack(t *testing.T) {
 	curtime = exp.Unix()
 	expire = uint32(curtime>>9) << 9
 	maxAddrSize := encodeKeyMeta(uint32(addr), size, expire)
-	expire += 1 << 9
+	expire += 1<<9 - 1
 	s, l, e = decodeKeyMeta(maxAddrSize)
 	if s != uint32(addr) || l != 19 || e != expire {
 		t.Errorf("get addr = %d, size=%d expire=%d", s, l, e)
