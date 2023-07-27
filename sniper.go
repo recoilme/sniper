@@ -17,6 +17,7 @@ import (
 
 const dirMode = 0755
 const fileMode = 0644
+const Version = "0.4.1"
 
 // ErrCollision -  must not happen
 var ErrCollision = errors.New("Error, hash collision")
